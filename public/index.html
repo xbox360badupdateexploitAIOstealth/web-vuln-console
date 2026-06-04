@@ -1,34 +1,38 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>Web Vuln Console</title>
-  <link rel="stylesheet" href="./styles.css" />
-</head>
-<body>
-  <div id="app">
-    <header class="topbar">
-      <div class="logo">Web Vuln Console</div>
-      <div class="status-indicator">
-        <span class="led led-online"></span> ONLINE
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Web Vulnerability Console</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="logo">WEB VULN CONSOLE</div>
+        <div class="status-pill status-ok">READY</div>
+      </header>
+      <div class="layout">
+        <aside class="sidebar">
+          <button data-view="dashboard">Dashboard</button>
+          <button data-view="projects">Projects</button>
+          <button data-view="jobs">Scan Jobs</button>
+          <button data-view="findings">Findings</button>
+          <button data-view="modules">Modules</button>
+          <button data-view="policies">Policies</button>
+          <button data-view="settings">Settings</button>
+        </aside>
+        <main class="main-pane">
+          <div id="view-container" class="view-container"></div>
+        </main>
       </div>
-    </header>
-    <div class="layout">
-      <nav class="sidebar">
-        <button data-view="dashboard">Dashboard</button>
-        <button data-view="projects">Projects</button>
-        <button data-view="jobs">Scan Jobs</button>
-        <button data-view="findings">Findings</button>
-        <button data-view="modules">Modules</button>
-        <button data-view="policies">Policies</button>
-        <button data-view="settings">Settings</button>
-      </nav>
-      <main class="mainpane">
-        <section id="view-container"></section>
-      </main>
     </div>
-  </div>
 
-  <script type="module" src="../src/ui/app.js"></script>
-</body>
+    <script type="module">
+      import { ensureTosAccepted } from '../src/ui/tos.js';
+      import '../src/ui/app.js';
+
+      ensureTosAccepted();
+    </script>
+  </body>
 </html>
