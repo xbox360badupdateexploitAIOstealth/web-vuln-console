@@ -1,0 +1,314 @@
+================================================================================
+  WEB-VULN-CONSOLE — DEV TRACKER & FEATURE STATUS
+  Project: Web Vulnerability Scanner Console
+  Repo: xbox360badupdateexploitAIOstealth/web-vuln-console
+  Last Updated: June 4, 2026
+  Status: Active Development — Phase 2/3
+================================================================================
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 1: WHAT HAS BEEN CODED & IS WORKING ✅
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[FRONTEND SHELL - WORKING]
+  ✅ index.html — Full dark-terminal console UI shell
+  ✅ style.css — Dark cyberpunk terminal theme, fully responsive
+  ✅ loader.css — Loading animations and spinners
+  ✅ frontend/app.js — ~50KB of frontend logic (largest file, core SPA)
+
+[UI VIEWS - WORKING]
+  ✅ dashboardView.js — Main dashboard view skeleton
+  ✅ findingsListView.js — Findings table with status/severity display
+  ✅ jobConsoleView.js — Live job log console view (streaming logs)
+  ✅ projectListView.js — Project list and management view
+  ✅ tos.js — Terms of Service modal + authorization gate (REQUIRED before scanning)
+  ✅ state.js — Global UI state management
+  ✅ src/ui/app.js — UI bootstrap and router
+
+[BACKEND SERVER - WORKING]
+  ✅ backend/server.js — Express.js HTTP server
+  ✅ backend/config.js — Server config constants (ports, limits, paths)
+  ✅ backend/jobsStore.js — In-memory job queue and tracking store
+  ✅ backend/worker.js — Background worker thread for scan jobs
+  ✅ backend/middleware/rateLimiter.js — Per-IP rate limiter
+  ✅ backend/middleware/requestLogger.js — Request logging middleware
+  ✅ backend/routes/dorksRoute.js — /api/dorks API endpoint
+  ✅ backend/routes/reportsRoute.js — /api/reports API endpoint
+
+[CORE ENGINE - WORKING]
+  ✅ src/core/httpClient.js — Fetch adapter wrapper (browser + Node compatible)
+  ✅ src/core/models.js — Core data model definitions (Finding, Evidence, Job, etc.)
+  ✅ src/core/siteModel.js — Per-target SiteModel object (stores crawled state)
+  ✅ src/core/policyRegistry.js — Scan policy definitions (Normal/Aggressive/Extreme)
+  ✅ src/core/moduleRegistry.js — Module loader, registry, and stack-filter logic
+  ✅ src/core/engine.js — Main scan orchestrator (Phase 1 passive exposure checks LIVE)
+  ✅ src/core/crawler.js — BFS/DFS web crawler (crawls links, forms, assets)
+  ✅ src/core/injection.js — SQLi / XSS / path traversal payload definitions
+
+[PASSIVE EXPOSURE MODULES - WORKING IN ENGINE]
+  ✅ .env direct exposure check (/.env)
+  ✅ .env variant checks (.env.local, .env.backup, .env.old, .env.bak, .env.prod)
+  ✅ DB dump detection (/backup.sql, /dump.sql, /database.sql, /db.sql)
+  ✅ Archive/backup file exposure (.zip, .tar.gz, .bak)
+  ✅ Directory listing detection ("Index of /")
+  ✅ .git component exposure (/.git/HEAD, /.git/config)
+  ✅ Verbose debug error detection (stack traces, error pages)
+
+[DORK ENGINE - WORKING]
+  ✅ backend/dorkEngine.js — Full Google + GitHub dork generator (~9.5KB)
+  ✅ Generates per-domain dork queries as clickable links
+  ✅ Covers: filetype:env, intitle:index.of, filename:.env, db credentials, API keys
+
+[REPORTING - WORKING]
+  ✅ backend/reportGenerator.js — HTML + Markdown report generator (~11KB)
+  ✅ Generates structured reports with findings, severity, remediation hints
+
+[UTILS - WORKING]
+  ✅ backend/utils/normalize.js — URL/domain normalizer (strips protocol, dedupes)
+  ✅ backend/utils/retry.js — HTTP retry with exponential backoff
+  ✅ backend/utils/severityScore.js — CVSS-style severity scoring
+
+[SETUP]
+  ✅ setup.sh — Full automated setup script for server environment
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 2: WHAT STILL NEEDS TO BE BUILT / IMPLEMENTED ❌
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[DATA PERSISTENCE - NOT DONE]
+  ❌ backend/data/ folder is EMPTY — no database or persistent storage hooked up
+  ❌ No Firestore / SQLite / PostgreSQL integration yet
+  ❌ Projects, targets, findings, jobs are not persisted across restarts
+  ❌ Evidence objects not stored in any DB (only in-memory during job run)
+  ❌ AuditLog model exists in design but no write logic implemented
+
+[ACTIVE SCANNING MODULES - NOT DONE]
+  ❌ SQLi active module — payloads defined in injection.js but not wired to engine
+  ❌ XSS reflected probe module — not connected to engine pipeline
+  ❌ Command injection module — not implemented
+  ❌ Path traversal module — payloads exist, no engine integration
+  ❌ SSTI / template injection module — not started
+  ❌ File upload endpoint detection and testing — not started
+  ❌ Extreme Mode scan profile — not wired to a full module run yet
+
+[CRAWLER - PARTIAL]
+  ❌ crawler.js exists but not fully integrated into engine.js Phase 2 flow
+  ❌ Parameter inventory (form fields, query params, headers) not saved to SiteModel yet
+  ❌ JavaScript asset parsing for hardcoded secrets not implemented
+  ❌ Source map / .map file detection not implemented
+
+[AUTH / SESSION MODULES - NOT DONE]
+  ❌ Cookie security flag checker (HttpOnly, Secure, SameSite) — not implemented
+  ❌ Session ID quality check (entropy, URL exposure) — not implemented
+  ❌ Login page detection + no-rate-limit detection — not implemented
+  ❌ TLS / HTTPS configuration checker — not implemented
+  ❌ HTTP security headers analysis (HSTS, CSP, X-Frame-Options) — not implemented
+
+[ADVANCED EXPOSURE MODULES - NOT DONE]
+  ❌ Framework-specific .env path checks (Dokans /script/.env CVE-2025-70841)
+  ❌ Laravel APP_KEY extraction + RCE risk flagging (CVE-2024-55556 pattern)
+  ❌ Mautic env exposure pattern (CVE-2024-47056 inspired)
+  ❌ Vite dev server env bypass check (CVE-2025-46565 pattern)
+  ❌ Moodle router directory listing (CVE-2025-62396 pattern)
+  ❌ phpinfo.php / /debug endpoint detection
+  ❌ SVN / Mercurial metadata exposure (/.svn/, /.hg/)
+  ❌ Front-end JS secret scanning (API keys, Bearer tokens in bundles)
+  ❌ Admin/internal URL harvesting from JS/HTML
+  ❌ Cloud storage misconfiguration detection (S3/Azure bucket leaks)
+
+[VIEWS - NOT DONE / SKELETON ONLY]
+  ❌ dashboardView.js — only skeleton, needs real stats/charts wired to data
+  ❌ Targets management view — no add/edit/delete target UI fully built
+  ❌ Module catalog view — not implemented (modules not browsable in UI)
+  ❌ Policy editor UI — policyRegistry.js exists but no UI to edit policies
+  ❌ Workspace/project hierarchy view — flat project list only, no workspaces
+  ❌ Finding detail side-panel — needs evidence, reproduction steps, OWASP tags
+  ❌ Report preview/export UI — backend generator exists, no UI trigger
+
+[INTEGRATIONS - NOT STARTED]
+  ❌ ZAP connector (API/Docker wrapper) — not started
+  ❌ Metasploit RPC connector — not started
+  ❌ Nmap CLI output parser/connector — not started
+  ❌ GitHub API integration for org/repo dorking automation — not started
+
+[SCAN SCHEDULING - NOT STARTED]
+  ❌ Scheduled scans (daily/weekly/monthly) — not started
+  ❌ Scan timeline / calendar view — not started
+  ❌ Re-run / clone scan job UI — not implemented
+
+[CORRELATION ENGINE - NOT STARTED]
+  ❌ Finding grouping / correlation logic — not started
+  ❌ "Related findings" linking (same secret reused in multiple places) — not started
+  ❌ Severity escalation via correlation rules — not started
+
+[REPORTING - PARTIAL]
+  ❌ No UI trigger for report generation yet
+  ❌ No OWASP/CWE/CVE tagging on findings in report output
+  ❌ No "Executive summary" auto-draft
+  ❌ No PDF export — only Markdown/HTML
+  ❌ No redacted report mode (strips actual secrets for client sharing)
+
+[MULTI-WORKER ARCHITECTURE - NOT STARTED]
+  ❌ Local agent mode (localhost:7777 worker) — not started
+  ❌ VPS worker agent API — not started
+  ❌ Android/Termux worker support — not started
+  ❌ Worker selector in UI ("Run on VPS / Local / Phone") — not started
+
+[AUTH / MULTI-USER - NOT STARTED]
+  ❌ User authentication — not started
+  ❌ Role system (owner/analyst/view-only) — not started
+  ❌ Per-project multi-user access — not started
+  ❌ Client portal login (future) — not started
+
+[MISC / POLISH - NOT DONE]
+  ❌ CLI client (scanner add-target, scanner run-scan etc.) — not started
+  ❌ REST API documentation — not started
+  ❌ Module versioning / ruleset versioning — not started
+  ❌ Import/export of rulesets and policies — not started
+  ❌ "Playbook" templates per finding category — not started
+  ❌ Script snippet library panel (Python/Bash one-liners) — not started
+  ❌ LLM-assisted finding summarization — not started
+  ❌ Electron/Tauri desktop wrapper — not started
+  ❌ Testing harness against DVWA/Mutillidae lab targets — not started
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 3: IMMEDIATE PRIORITY ITEMS (DO THESE FIRST) 🔥
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  P1.  Wire crawler.js output into engine.js Phase 2 properly
+  P2.  Connect injection.js payloads to engine active module pipeline
+  P3.  Implement data persistence (SQLite — no setup needed, just a file)
+  P4.  Build TLS/header security checker module (easy wins for client reports)
+  P5.  Add cookie security flag checker module
+  P6.  Wire report generation to a UI button (reportGenerator.js already works!)
+  P7.  Build module catalog view so you can see all modules in UI
+  P8.  Add OWASP/CWE tags to Finding model output
+  P9.  Implement finding detail panel with evidence + remediation text
+  P10. Add Extreme Mode toggle that enables all active modules
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 4: NEW IDEAS & FEATURES TO ADD 💡
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  IDEA-01: CVE Pattern Tag Engine
+    - When a finding matches known CVE pattern (Dokans, Vite, Mautic, Moodle, Laravel)
+      auto-label the finding: "Matches CVE-YYYY-XXXXX pattern"
+    - Huge value for client reports — real documented vuln not theoretical
+
+  IDEA-02: Finding "Risk Score" Dashboard Widget
+    - Calculate a project risk score (0-100) like CVSS score for entire project
+    - Visual ring/gauge on dashboard showing total exposure level
+    - Color: green=safe, yellow=moderate, red=critical, DARK RED=evacuate
+
+  IDEA-03: Passive Recon "Ghost Mode"
+    - A mode that ONLY uses dorks + passive reads, never sends a probe to target
+    - No footprint on target at all — 100% stealth
+    - Useful for initial recon before client has signed off fully
+
+  IDEA-04: Target Import from File
+    - Upload a .txt or .csv with list of domains/IPs
+    - Auto-normalize and add to project targets in bulk
+    - Needed for datacenter clients with 100+ assets
+
+  IDEA-05: "Live Threat Intel" Badge on Findings
+    - When .env exposure found, show badge: "Actively exploited by bots at scale"
+    - Reference GreyNoise / Shodan threat intel context
+    - Makes reports way more convincing for clients who need to see urgency
+
+  IDEA-06: Scope Lock System
+    - Define scope boundaries per project: only scan *.example.com
+    - Crawler/engine auto-rejects any URL outside defined scope
+    - Prevents accidental out-of-scope scanning
+
+  IDEA-07: Screenshot Capture on Critical Findings
+    - When critical finding found (exposed .env, SQL dump etc.)
+    - Headless browser captures screenshot of the URL as evidence
+    - Auto-attach to report like a bug bounty writeup
+
+  IDEA-08: Findings Status Kanban Board
+    - Open → Confirmed → Mitigated → False Positive
+    - Drag and drop cards per finding
+    - Track remediation progress per project
+
+  IDEA-09: Per-Scan Diff Mode
+    - Compare current scan vs previous scan findings
+    - Show: NEW findings (red), FIXED findings (green), UNCHANGED (grey)
+    - Critical for recurring client assessments
+
+  IDEA-10: "Dork Assistant" Chatbot Panel
+    - In-app panel where you type a target type (e.g. "WordPress hosting")
+    - Returns top 10 dork queries to run right now
+    - Smart dork suggester based on stack fingerprint
+
+  IDEA-11: Mobile PWA Mode
+    - Make the app installable as a PWA on Android/iOS
+    - Offline-capable for viewing saved findings without server
+
+  IDEA-12: Header Fingerprint Database
+    - Maintain a mini DB of server/framework response header signatures
+    - Auto-detect: Laravel, WordPress, Django, Rails, ASP.NET, Spring Boot
+    - More accurate stack fingerprinting = better module selection
+
+  IDEA-13: WebSocket Live Job Feed
+    - Replace polling-based job status with WebSocket
+    - True real-time streaming logs like a terminal with zero lag
+
+  IDEA-14: Quick-Launch Scan Templates
+    - Pre-built scan configs: "WordPress Full Audit", "API Backend Check", "Laravel Env Hunt"
+    - One click to run a purpose-built scan package
+
+  IDEA-15: OWASP Top 10 2025 Full Coverage Checklist
+    - Visual checklist per project showing which OWASP Top 10 categories are tested
+    - Green checkmark = module covers it, Red X = not tested yet
+    - Great for client deliverables showing coverage
+
+  IDEA-16: Subdomain Enumeration Module
+    - Passive: Certificate Transparency logs (crt.sh API)
+    - Passive: DNS brute-force wordlist (top 500 subdomains)
+    - Auto-add discovered subdomains as new targets in same project
+
+  IDEA-17: API Endpoint Discovery Module
+    - Look for Swagger/OpenAPI spec at /api-docs, /swagger.json, /openapi.yaml
+    - Auto-import all endpoints as scan targets
+    - Run injection/auth modules against each endpoint
+
+  IDEA-18: Custom Payload Library Manager
+    - UI to add/edit/remove payloads per module (SQLi, XSS, traversal etc.)
+    - Import/export payload lists (compatible with SecLists format)
+
+  IDEA-19: Notification System
+    - Email or webhook alert when critical finding is discovered
+    - Slack/Discord webhook support (one config line)
+
+  IDEA-20: Evidence Vault
+    - Encrypted local storage for all raw HTTP evidence
+    - Full request/response stored for legal proof
+    - "Lock" a project to freeze evidence at point-in-time for reporting
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 5: ARCHITECTURE NOTES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  TWO PARALLEL CODE TREES EXIST — NEEDS RECONCILIATION:
+    - /src/core/  = newer modular engine system (engine.js, modules, registry)
+    - /backend/   = older Express server + engine-bridge.js approach
+
+  Recommended unification path:
+    - backend/engine-bridge.js should IMPORT from src/core/engine.js
+    - src/core/ becomes the single source of truth for all scan logic
+    - backend/ stays as the HTTP API wrapper only
+
+  CORS Strategy:
+    - Browser-only scanning = limited by CORS sandbox
+    - Recommended: local Node agent on port 7777 OR full VPS backend
+    - engine.js + httpClient.js adapter design already supports both modes
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  END OF DEV TRACKER — web-vuln-console
+  Always be scanning. Always authorized. Always document.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
