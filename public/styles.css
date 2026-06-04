@@ -1,103 +1,34 @@
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-
-body {
-  background: #050712;
-  color: #e5e9f0;
-}
-
-#app {
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-}
-
-.topbar {
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: #0b1020;
-  padding: 0 16px;
-  border-bottom: 1px solid #1f2933;
-}
-
-.logo {
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  font-size: 14px;
+/* findings severity badges */
+.sev {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
   text-transform: uppercase;
-  color: #7dd3fc;
+  letter-spacing: 0.04em;
 }
-
-.status-indicator {
-  font-size: 11px;
-  color: #9ca3af;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.sev-critical {
+  background: rgba(248, 113, 113, 0.15);
+  color: #fecaca;
+  border: 1px solid rgba(248, 113, 113, 0.5);
 }
-
-.led {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+.sev-high {
+  background: rgba(251, 146, 60, 0.15);
+  color: #fed7aa;
+  border: 1px solid rgba(251, 146, 60, 0.5);
 }
-
-.led-online {
-  background: #22c55e;
-  box-shadow: 0 0 6px rgba(34, 197, 94, 0.9);
+.sev-medium {
+  background: rgba(250, 204, 21, 0.15);
+  color: #fef3c7;
+  border: 1px solid rgba(250, 204, 21, 0.5);
 }
-
-.layout {
-  flex: 1;
-  display: flex;
-  min-height: 0;
+.sev-low {
+  background: rgba(52, 211, 153, 0.15);
+  color: #a7f3d0;
+  border: 1px solid rgba(52, 211, 153, 0.5);
 }
-
-.sidebar {
-  width: 180px;
-  background: #050816;
-  border-right: 1px solid #1f2933;
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.sidebar button {
-  background: #050816;
-  border: 1px solid #111827;
-  color: #9ca3af;
-  padding: 8px 10px;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-  border-radius: 4px;
-  transition: background 0.1s, border-color 0.1s, color 0.1s;
-}
-
-.sidebar button:hover {
-  background: #0b1120;
-  border-color: #2563eb;
-  color: #e5e9f0;
-}
-
-.mainpane {
-  flex: 1;
-  padding: 12px;
-  overflow: auto;
-}
-
-#view-container {
-  font-size: 13px;
-  border-radius: 6px;
-  background: #020617;
-  border: 1px solid #111827;
-  padding: 12px;
-  min-height: calc(100vh - 48px - 24px);
+.sev-info {
+  background: rgba(96, 165, 250, 0.15);
+  color: #bfdbfe;
+  border: 1px solid rgba(96, 165, 250, 0.5);
 }
