@@ -1,0 +1,66 @@
+/* frontend/loader.css
+   Boot splash / loading animation shown before the ToS modal. */
+
+.boot-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: #030712;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  color: #00ff9d;
+  transition: opacity .4s;
+}
+
+.boot-splash.fade-out {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.boot-logo {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-shadow: 0 0 20px rgba(0,255,157,.4);
+}
+
+.boot-tagline {
+  font-size: 12px;
+  opacity: .5;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.boot-bar {
+  width: 220px;
+  height: 3px;
+  background: #0f172a;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.boot-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #00ff9d, #7c3aed);
+  border-radius: 2px;
+  animation: bootProgress 1.4s ease-out forwards;
+}
+
+@keyframes bootProgress {
+  0%   { width: 0%;   }
+  60%  { width: 75%;  }
+  100% { width: 100%; }
+}
+
+.boot-lines {
+  font-size: 10px;
+  opacity: .4;
+  text-align: center;
+  line-height: 1.8;
+  max-width: 300px;
+}

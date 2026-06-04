@@ -1,37 +1,34 @@
 // backend/worker.js
-// Background worker loop that pulls queued jobs from the store and runs scans.
+// Background worker loop. Pulls queued jobs and runs the scan engine.
 
 const { config } = require('./config');
 const {
   nextQueuedJob,
   updateJob,
-  getJob,
   saveJobResult,
 } = require('./jobsStore');
-
-// Reuse the existing engine code compiled for Node via dynamic import.
-const engine = require('../dist-node/engine-node.js');
+const engine = require('./engine-bridge');
 
 let activeJobs = 0;
 
 async function workerLoop() {
   if (activeJobs >= config.maxConcurrentJobs) return;
-
   const job = nextQueuedJob();
   if (!job) return;
 
   activeJobs++;
   updateJob(job.id, { status: 'running', progress: 0, error: null });
+  console.log(`[WORKER] Starting job ${job.id} (project: ${job.projectId}, targets: ${Array.isArray(job.targets) ? job.targets.length : 0})`);
 
   try {
     const ctx = await engine.runScanJobFromJobRecord(job, {
-      maxParallelTargetsPerJob: config.maxParallelTargetsPerJob,
+      maxParallelTargetsPerJob: config.maxParallelTargetsPerJob || 2,
     });
-
     saveJobResult(job.id, ctx);
     updateJob(job.id, { status: 'completed', progress: 100 });
+    console.log(`[WORKER] Job ${job.id} completed. Findings: ${ctx.findings.length}`);
   } catch (err) {
-    console.error('Worker error for job', job.id, err);
+    console.error(`[WORKER] Job ${job.id} FAILED:`, err);
     updateJob(job.id, {
       status: 'failed',
       error: String(err && err.stack ? err.stack : err),
@@ -42,7 +39,7 @@ async function workerLoop() {
 }
 
 function startWorker() {
-  // Run a tick every 2 seconds.
+  console.log('[WORKER] Background scan worker started. Polling every 2s.');
   setInterval(workerLoop, 2000);
 }
 
