@@ -9,7 +9,7 @@
 </head>
 <body>
 
-  <!-- ─── Boot Splash ─────────────────────────────────────────────────────── -->
+  <!-- Boot Splash -->
   <div class="boot-splash" id="boot-splash">
     <div class="boot-logo">⚡ WebVulnConsole</div>
     <div class="boot-tagline">Authorized Security Testing Platform</div>
@@ -21,33 +21,43 @@
     </div>
   </div>
 
-  <!-- ─── ToS Modal ───────────────────────────────────────────────────────── -->
+  <!-- ToS Modal -->
   <div id="tos-overlay" class="tos-overlay hidden">
     <div class="tos-box">
       <div class="tos-logo">⚡ WebVulnConsole</div>
       <div class="tos-title">Authorization Required</div>
       <div class="tos-text">
         By proceeding you confirm that:<br /><br />
-        • You are the owner of, or have <strong>explicit written authorization</strong> to perform security testing on, every target you enter.<br />
+        • You are the <strong>owner</strong> of, or have <strong>explicit written authorization</strong>
+          to perform security testing on, every target you enter.<br />
         • This tool is for <strong>authorized penetration testing only</strong>.<br />
         • Unauthorized scanning is illegal under the Computer Fraud and Abuse Act and equivalent laws worldwide.<br />
         • All findings will be handled responsibly and disclosed only to the authorized party.<br /><br />
         <strong>Misuse of this tool is entirely your responsibility.</strong>
       </div>
       <div class="tos-check-row">
-        <label><input type="checkbox" id="tos-check" /> I confirm I have authorization for all targets I will test.</label>
+        <label><input type="checkbox" id="tos-check" />
+          I confirm I have authorization for all targets I will test.</label>
       </div>
       <div class="tos-check-row" style="margin-top:8px;">
-        <label><input type="checkbox" id="tos-check2" /> I understand this tool must not be used maliciously.</label>
+        <label><input type="checkbox" id="tos-check2" />
+          I understand this tool must not be used maliciously.</label>
       </div>
-      <input class="tos-input" type="text" id="tos-client" placeholder="Client name / Ticket ID (for your records)" />
+      <input class="tos-input" type="text" id="tos-client"
+        placeholder="Client name / Ticket ID (for your records)" />
       <button class="tos-btn" id="tos-enter" disabled>Enter Console</button>
-      <p class="tos-note">Your authorization record is stored locally in this session only.</p>
+      <p class="tos-note">Authorization record stored in session only.</p>
     </div>
   </div>
 
-  <!-- ─── App Shell ───────────────────────────────────────────────────────── -->
+  <!-- App Shell -->
   <div id="app" class="app hidden">
+
+    <!-- Mobile hamburger -->
+    <button id="hamburger-btn" style="display:none;position:fixed;top:12px;left:12px;z-index:600;
+      background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:8px 10px;
+      color:#e2e8f0;font-size:18px;cursor:pointer;line-height:1;">☰</button>
+
     <!-- Sidebar -->
     <nav class="sidebar" id="sidebar">
       <div class="sidebar-logo">⚡ WVC</div>
@@ -83,7 +93,7 @@
         <div class="console-input-row">
           <span class="console-prompt">▶</span>
           <input class="console-input" id="console-input" type="text"
-            placeholder="help | scan | dorks <domain> | show findings | project <name>" />
+            placeholder="help | scan | dorks example.com | add target url | show findings | risk" />
         </div>
       </div>
 
@@ -93,7 +103,10 @@
         <!-- Dashboard -->
         <div class="page active" id="page-dashboard">
           <div class="stat-row" id="stat-row"></div>
-          <div class="section-title" style="margin-top:16px;">Recent High / Critical Findings</div>
+          <div id="dashboard-risk-gauge"></div>
+          <div class="section-title" style="margin-top:16px;">Recent High / Critical Findings
+            <button class="btn btn-sm btn-ghost" style="margin-left:8px;" onclick="loadDashboard()">↻ Refresh</button>
+          </div>
           <div id="recent-findings"></div>
         </div>
 
@@ -123,7 +136,7 @@
         <!-- Scan Queue -->
         <div class="page" id="page-queue">
           <div class="section-title">Scan Queue
-            <button class="btn btn-sm btn-ghost" id="btn-refresh-queue" onclick="loadQueue()">↻ Refresh</button>
+            <button class="btn btn-sm btn-ghost" onclick="loadQueue()">↻ Refresh</button>
           </div>
           <div id="queue-list"></div>
         </div>
@@ -139,6 +152,7 @@
               </select>
               <select class="select-sm" id="filter-cat"><option value="">All Categories</option></select>
             </span>
+            <button class="btn btn-sm btn-ghost" style="margin-left:8px;" onclick="loadFindings()">↻ Refresh</button>
           </div>
           <div id="findings-table-wrap"></div>
         </div>
@@ -147,7 +161,8 @@
         <div class="page" id="page-dorks">
           <div class="section-title">Dork Generator</div>
           <div class="input-group" style="display:flex;gap:8px;">
-            <input class="input-text" id="dork-domain-input" type="text" placeholder="example.com" style="flex:1;" />
+            <input class="input-text" id="dork-domain-input" type="text"
+              placeholder="example.com" style="flex:1;" />
             <button class="btn btn-primary" id="btn-gen-dorks">Generate</button>
           </div>
           <div id="dork-results"></div>
@@ -164,9 +179,11 @@
           <div class="section-title">Settings</div>
           <div class="settings-form">
             <label class="settings-label">Backend URL (where Node server is running)</label>
-            <input class="input-text" id="setting-backend-url" type="text" placeholder="http://127.0.0.1:8787" />
+            <input class="input-text" id="setting-backend-url" type="text"
+              placeholder="http://127.0.0.1:8787" />
             <label class="settings-label">Authorization Note</label>
-            <input class="input-text" id="setting-auth-note" type="text" placeholder="Client name / ticket ID" />
+            <input class="input-text" id="setting-auth-note" type="text"
+              placeholder="Client name / ticket ID" />
             <button class="btn btn-primary" id="btn-save-settings">Save Settings</button>
             <div id="settings-saved" style="font-size:11px;color:var(--green);display:none;margin-top:4px;">✓ Saved</div>
           </div>
@@ -178,7 +195,6 @@
 
   <script src="app.js"></script>
   <script>
-    // Boot splash: fade out after 1.6s then show ToS.
     setTimeout(() => {
       const splash = document.getElementById('boot-splash');
       splash.classList.add('fade-out');
