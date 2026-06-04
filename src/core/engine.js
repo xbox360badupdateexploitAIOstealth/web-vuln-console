@@ -1,6 +1,5 @@
 // src/core/engine.js
-// Scan engine: passive exposure + HTML crawl to build SiteModel
-// (injection modules will use SiteModel later).
+// Scan engine: passive exposure + HTML crawl + basic active injection checks.
 
 import { ScanJob, Finding, Evidence } from './models.js';
 import { moduleDefById } from './moduleRegistry.js';
@@ -8,6 +7,7 @@ import { scanPolicyById } from './policyRegistry.js';
 import { SiteModel } from './siteModel.js';
 import { httpGetText } from './httpClient.js';
 import { crawlTargetAndBuildSiteModel } from './crawler.js';
+import { runActiveInjectionChecks } from './injection.js';
 
 export class EngineConfig {
   constructor({ fetchAdapter, baseUrlResolver }) {
@@ -83,7 +83,7 @@ async function scanTarget({ ctx, target, enabledModules, engineConfig }) {
   // Phase 1: passive exposure checks.
   await runPassiveExposureChecks({ ctx, target, baseUrl, siteModel, enabledModules, engineConfig });
 
-  // Phase 2: basic HTML crawl to discover more endpoints.
+  // Phase 2: HTML crawl to discover endpoints & parameters.
   await crawlTargetAndBuildSiteModel({
     ctx,
     target,
@@ -94,7 +94,17 @@ async function scanTarget({ ctx, target, enabledModules, engineConfig }) {
     maxPages: 20,
   });
 
-  ctx.log(`SiteModel for ${target.host}: ${siteModel.getAllEndpoints().length} endpoints discovered.`);
+  const endpointCount = siteModel.getAllEndpoints().length;
+  ctx.log(`SiteModel for ${target.host}: ${endpointCount} endpoints discovered.`);
+
+  // Phase 3: Active injection checks (SQLi, XSS) if enabled.
+  await runActiveInjectionChecks({
+    ctx,
+    target,
+    siteModel,
+    enabledModules,
+    engineConfig,
+  });
 }
 
 async function runPassiveExposureChecks({ ctx, target, baseUrl, siteModel, enabledModules, engineConfig }) {
