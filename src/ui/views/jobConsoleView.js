@@ -1,6 +1,7 @@
 // src/ui/views/jobConsoleView.js
 import { runScanJob, EngineConfig } from '../../core/engine.js';
 import { Project, Target, ScanJob } from '../../core/models.js';
+import { setLastScanContext } from '../state.js';
 
 // Demo project/target for console scans.
 const demoProject = new Project({
@@ -44,7 +45,7 @@ export async function renderJobConsole(container) {
   container.innerHTML = `
     <h1>Scan Console</h1>
     <p style="margin-top: 4px; font-size: 12px; opacity: 0.75;">
-      This view runs a real passive exposure scan against a demo target using the current policy.
+      This view runs a real scan against a demo target using the current policy.
     </p>
     <div style="margin-top: 8px;">
       <label style="font-size: 12px;">Policy:
@@ -88,12 +89,14 @@ export async function renderJobConsole(container) {
         targets: demoTargets,
         engineConfig,
       });
+      setLastScanContext(ctx);
       logEl.textContent = ctx.logs.join('\n');
       if (ctx.findings.length) {
         logEl.textContent += `\n\nFindings (IDs/Titles):\n`;
         for (const f of ctx.findings) {
           logEl.textContent += ` - ${f.id}: ${f.title}\n`;
         }
+        logEl.textContent += `\nOpen the Findings view to inspect evidence.`;
       }
     } catch (err) {
       logEl.textContent = `Error: ${err.message || err}`;
