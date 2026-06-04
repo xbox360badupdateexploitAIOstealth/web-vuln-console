@@ -1,34 +1,36 @@
 // src/core/engine.js
-// Scan engine: passive exposure + HTML crawl + basic active injection checks.
+// Scan engine: passive exposure + TLS/headers + HTML crawl + active injection.
+// v1.2.0 — TLS/headers checker fully wired (Task 3).
 
 import { ScanJob, Finding, Evidence } from './models.js';
-import { moduleDefById } from './moduleRegistry.js';
-import { scanPolicyById } from './policyRegistry.js';
-import { SiteModel } from './siteModel.js';
-import { httpGetText } from './httpClient.js';
+import { moduleDefById }               from './moduleRegistry.js';
+import { scanPolicyById }              from './policyRegistry.js';
+import { SiteModel }                   from './siteModel.js';
+import { httpGetText }                 from './httpClient.js';
 import { crawlTargetAndBuildSiteModel } from './crawler.js';
-import { runActiveInjectionChecks } from './injection.js';
+import { runActiveInjectionChecks }    from './injection.js';
+import { runTlsHeaderChecks }          from './checks/tlsHeaders.js';
 
 export class EngineConfig {
   constructor({ fetchAdapter, baseUrlResolver }) {
-    this.fetchAdapter = fetchAdapter;
+    this.fetchAdapter    = fetchAdapter;
     this.baseUrlResolver = baseUrlResolver;
   }
 }
 
 export class EngineContext {
   constructor({ job, project, targets }) {
-    this.job = job;
-    this.project = project;
-    this.targets = targets;
+    this.job        = job;
+    this.project    = project;
+    this.targets    = targets;
     this.siteModels = new Map();
-    this.findings = [];
-    this.evidences = [];
-    this.logs = [];
+    this.findings   = [];
+    this.evidences  = [];
+    this.logs       = [];
   }
 
   log(message) {
-    const ts = new Date().toISOString();
+    const ts   = new Date().toISOString();
     const line = `[${ts}] ${message}`;
     this.logs.push(line);
     console.log(line);
@@ -41,31 +43,25 @@ export class EngineContext {
     return this.siteModels.get(targetId);
   }
 
-  addFinding(finding) {
-    this.findings.push(finding);
-  }
-
-  addEvidence(evidence) {
-    this.evidences.push(evidence);
-  }
+  addFinding(finding)   { this.findings.push(finding); }
+  addEvidence(evidence) { this.evidences.push(evidence); }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 export async function runScanJob({ jobInput, project, targets, engineConfig }) {
-  const job = jobInput instanceof ScanJob ? jobInput : new ScanJob(jobInput);
+  const job    = jobInput instanceof ScanJob ? jobInput : new ScanJob(jobInput);
   const policy = scanPolicyById[job.policyId];
-  if (!policy) {
-    throw new Error(`Unknown policy: ${job.policyId}`);
-  }
+  if (!policy) throw new Error(`Unknown policy: ${job.policyId}`);
 
   const ctx = new EngineContext({ job, project, targets });
-  ctx.log(`Starting scan job ${job.id} with policy ${policy.name}`);
+  ctx.log(`Starting scan job ${job.id} with policy "${policy.name}"`);
 
   const enabledModules = Object.entries(policy.moduleOverrides)
     .filter(([, cfg]) => cfg.enabled)
     .map(([id]) => moduleDefById[id])
     .filter(Boolean);
 
-  ctx.log(`Enabled modules: ${enabledModules.map((m) => m.id).join(', ') || '(none)'}`);
+  ctx.log(`Enabled modules (${enabledModules.length}): ${enabledModules.map((m) => m.id).join(', ') || '(none)'}`);
 
   for (const target of targets) {
     await scanTarget({ ctx, target, enabledModules, engineConfig });
@@ -77,27 +73,38 @@ export async function runScanJob({ jobInput, project, targets, engineConfig }) {
 
 async function scanTarget({ ctx, target, enabledModules, engineConfig }) {
   const baseUrl = engineConfig.baseUrlResolver(target);
-  ctx.log(`Scanning target ${target.host} (base URL: ${baseUrl})`);
+  ctx.log(`\n--- Scanning target: ${target.host} (${baseUrl}) ---`);
   const siteModel = ctx.getOrCreateSiteModel(target.id);
 
-  // Phase 1: passive exposure checks.
+  // ── Phase 1: Passive exposure checks ─────────────────────────────────────────
   await runPassiveExposureChecks({ ctx, target, baseUrl, siteModel, enabledModules, engineConfig });
 
-  // Phase 2: HTML crawl to discover endpoints & parameters.
+  // ── Phase 1b: TLS & security headers ───────────────────────────────────────
+  if (moduleEnabled(enabledModules, 'tls.headers.basic')) {
+    await runTlsHeaderChecks({
+      ctx,
+      target,
+      baseUrl,
+      fetchAdapter: engineConfig.fetchAdapter,
+    });
+  }
+
+  // ── Phase 2: HTML crawl to discover endpoints & parameters ─────────────────
   await crawlTargetAndBuildSiteModel({
     ctx,
     target,
     baseUrl,
     siteModel,
     engineConfig,
-    maxDepth: 1,
-    maxPages: 20,
+    maxDepth: 2,
+    maxPages: 30,
   });
 
-  const endpointCount = siteModel.getAllEndpoints().length;
-  ctx.log(`SiteModel for ${target.host}: ${endpointCount} endpoints discovered.`);
+  const paramEps = siteModel.getParamEndpoints().length;
+  const allEps   = siteModel.getAllEndpoints().length;
+  ctx.log(`SiteModel: ${allEps} endpoints total, ${paramEps} with parameters.`);
 
-  // Phase 3: Active injection checks (SQLi, XSS) if enabled.
+  // ── Phase 3: Active injection checks ─────────────────────────────────────
   await runActiveInjectionChecks({
     ctx,
     target,
@@ -107,335 +114,240 @@ async function scanTarget({ ctx, target, enabledModules, engineConfig }) {
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PASSIVE EXPOSURE CHECKS
+// ─────────────────────────────────────────────────────────────────────────────
+
 async function runPassiveExposureChecks({ ctx, target, baseUrl, siteModel, enabledModules, engineConfig }) {
   const { fetchAdapter } = engineConfig;
-  const expEnvDirect = moduleEnabled(enabledModules, 'exposure.env.direct');
-  const expEnvVariants = moduleEnabled(enabledModules, 'exposure.env.variants');
-  const expDbDumps = moduleEnabled(enabledModules, 'exposure.backup.db_dumps');
-  const expArchives = moduleEnabled(enabledModules, 'exposure.backup.archives');
-  const expDirListing = moduleEnabled(enabledModules, 'misconfig.dirlisting.generic');
-  const expGit = moduleEnabled(enabledModules, 'vcs.git.exposed');
-  const expDebug = moduleEnabled(enabledModules, 'debug.stacktraces');
 
-  if (expEnvDirect) {
-    await checkEnvDirect({ ctx, target, baseUrl, fetchAdapter });
-  }
-  if (expEnvVariants) {
-    await checkEnvVariants({ ctx, target, baseUrl, fetchAdapter });
-  }
-  if (expDbDumps) {
-    await checkDbDumps({ ctx, target, baseUrl, fetchAdapter });
-  }
-  if (expArchives) {
-    await checkArchives({ ctx, target, baseUrl, fetchAdapter });
-  }
-  if (expDirListing) {
-    await checkDirListing({ ctx, target, baseUrl, fetchAdapter });
-  }
-  if (expGit) {
-    await checkGitExposed({ ctx, target, baseUrl, fetchAdapter });
-  }
-  if (expDebug) {
-    await checkDebugErrors({ ctx, target, baseUrl, fetchAdapter });
-  }
+  if (moduleEnabled(enabledModules, 'exposure.env.direct'))          await checkEnvDirect        ({ ctx, target, baseUrl, fetchAdapter });
+  if (moduleEnabled(enabledModules, 'exposure.env.variants'))        await checkEnvVariants       ({ ctx, target, baseUrl, fetchAdapter });
+  if (moduleEnabled(enabledModules, 'exposure.backup.db_dumps'))     await checkDbDumps          ({ ctx, target, baseUrl, fetchAdapter });
+  if (moduleEnabled(enabledModules, 'exposure.backup.archives'))     await checkArchives         ({ ctx, target, baseUrl, fetchAdapter });
+  if (moduleEnabled(enabledModules, 'misconfig.dirlisting.generic')) await checkDirListing       ({ ctx, target, baseUrl, fetchAdapter });
+  if (moduleEnabled(enabledModules, 'vcs.git.exposed'))              await checkGitExposed       ({ ctx, target, baseUrl, fetchAdapter });
+  if (moduleEnabled(enabledModules, 'debug.stacktraces'))            await checkDebugErrors      ({ ctx, target, baseUrl, fetchAdapter });
 }
 
-function moduleEnabled(enabledModules, moduleId) {
-  return enabledModules.some((m) => m.id === moduleId);
+function moduleEnabled(mods, id) {
+  return mods.some((m) => m.id === id);
 }
 
+// ── .env direct ─────────────────────────────────────────────────────────────────
 async function checkEnvDirect({ ctx, target, baseUrl, fetchAdapter }) {
   const url = baseUrl.replace(/\/$/, '') + '/.env';
-  ctx.log(`Checking direct .env exposure at ${url}`);
-  const res = await httpGetText({ fetchAdapter, url });
-  if (res.status === 200 && looksLikeDotenv(res.body)) {
-    const finding = new Finding({
-      projectId: ctx.project.id,
-      scanJobId: ctx.job.id,
-      targetId: target.id,
-      moduleId: 'exposure.env.direct',
-      title: 'Exposed .env file',
-      shortDescription: `The .env file is accessible at ${url}.`,
-      detailedDescription:
-        'The application exposes its dotenv configuration file (.env), which often contains database credentials, API keys, and other secrets.',
-      severity: 'critical',
-      category: 'exposure',
-      owaspTag: 'A02-Cryptographic-Failures',
-    });
-    const evidence = new Evidence({
-      findingId: finding.id,
-      url,
-      method: 'GET',
-      responseStatus: res.status,
-      responseHeadersSnippet: JSON.stringify(res.headers).slice(0, 512),
-      responseBodySnippet: res.body.slice(0, 2048),
-      matchedPattern: 'dotenv-style key=value pairs',
-    });
-    ctx.addFinding(finding);
-    ctx.addEvidence(evidence);
-    ctx.log(`CRITICAL: .env exposed at ${url}`);
-  } else {
-    ctx.log(`No direct .env exposure at ${url} (status ${res.status}).`);
-  }
-}
-
-async function checkEnvVariants({ ctx, target, baseUrl, fetchAdapter }) {
-  const mod = moduleDefById['exposure.env.variants'];
-  const paths = (mod.configSchema?.properties?.paths?.default) || [];
-  for (const path of paths) {
-    const url = baseUrl.replace(/\/$/, '') + path;
-    ctx.log(`Checking .env variant at ${url}`);
+  ctx.log(`Checking direct .env exposure: ${url}`);
+  try {
     const res = await httpGetText({ fetchAdapter, url });
     if (res.status === 200 && looksLikeDotenv(res.body)) {
       const finding = new Finding({
-        projectId: ctx.project.id,
-        scanJobId: ctx.job.id,
-        targetId: target.id,
-        moduleId: 'exposure.env.variants',
-        title: 'Exposed .env variant file',
-        shortDescription: `A dotenv-style variant file is accessible at ${url}.`,
+        projectId: ctx.project.id, scanJobId: ctx.job.id, targetId: target.id,
+        moduleId: 'exposure.env.direct',
+        title: 'Exposed .env File',
+        shortDescription: `The .env file is accessible at ${url}.`,
         detailedDescription:
-          'A dotenv configuration variant (.env.local, .env.backup, etc.) is exposed and likely contains sensitive configuration secrets.',
-        severity: 'critical',
-        category: 'exposure',
-        owaspTag: 'A02-Cryptographic-Failures',
-      });
-      const evidence = new Evidence({
-        findingId: finding.id,
-        url,
-        method: 'GET',
-        responseStatus: res.status,
-        responseHeadersSnippet: JSON.stringify(res.headers).slice(0, 512),
-        responseBodySnippet: res.body.slice(0, 2048),
-        matchedPattern: 'dotenv-style key=value pairs',
+          'The application\'s dotenv configuration file (.env) is publicly accessible. ' +
+          'It often contains database credentials, API keys, and other secrets in plaintext.',
+        severity: 'critical', category: 'exposure',
+        owaspTag: 'A02-Cryptographic-Failures', cweTag: 'CWE-359',
       });
       ctx.addFinding(finding);
-      ctx.addEvidence(evidence);
-      ctx.log(`CRITICAL: .env variant exposed at ${url}`);
+      ctx.addEvidence(new Evidence({ findingId: finding.id, url, method: 'GET', responseStatus: res.status, responseHeadersSnippet: JSON.stringify(res.headers).slice(0, 512), responseBodySnippet: res.body.slice(0, 2048), matchedPattern: 'dotenv key=value pairs' }));
+      ctx.log(`🔴 CRITICAL: .env exposed at ${url}`);
+    } else {
+      ctx.log(`No .env exposure at ${url} (status ${res.status})`);
     }
+  } catch (e) { ctx.log(`checkEnvDirect error: ${e.message || e}`); }
+}
+
+// ── .env variants ─────────────────────────────────────────────────────────────
+async function checkEnvVariants({ ctx, target, baseUrl, fetchAdapter }) {
+  const mod   = moduleDefById['exposure.env.variants'];
+  const paths = mod?.configSchema?.properties?.paths?.default || [];
+  for (const p of paths) {
+    const url = baseUrl.replace(/\/$/, '') + p;
+    ctx.log(`Checking .env variant: ${url}`);
+    try {
+      const res = await httpGetText({ fetchAdapter, url });
+      if (res.status === 200 && looksLikeDotenv(res.body)) {
+        const finding = new Finding({
+          projectId: ctx.project.id, scanJobId: ctx.job.id, targetId: target.id,
+          moduleId: 'exposure.env.variants',
+          title: 'Exposed .env Variant File',
+          shortDescription: `A dotenv variant file is accessible at ${url}.`,
+          detailedDescription: 'A dotenv configuration variant is publicly accessible and likely contains sensitive secrets.',
+          severity: 'critical', category: 'exposure',
+          owaspTag: 'A02-Cryptographic-Failures', cweTag: 'CWE-359',
+        });
+        ctx.addFinding(finding);
+        ctx.addEvidence(new Evidence({ findingId: finding.id, url, method: 'GET', responseStatus: res.status, responseHeadersSnippet: JSON.stringify(res.headers).slice(0, 512), responseBodySnippet: res.body.slice(0, 2048), matchedPattern: 'dotenv key=value pairs' }));
+        ctx.log(`🔴 CRITICAL: .env variant exposed at ${url}`);
+      }
+    } catch (e) { ctx.log(`checkEnvVariants error: ${e.message || e}`); }
   }
 }
 
+// ── DB dumps ────────────────────────────────────────────────────────────────────
 async function checkDbDumps({ ctx, target, baseUrl, fetchAdapter }) {
-  const mod = moduleDefById['exposure.backup.db_dumps'];
-  const paths = (mod.configSchema?.properties?.candidateNames?.default) || [];
-  for (const path of paths) {
-    const url = baseUrl.replace(/\/$/, '') + path;
-    ctx.log(`Checking DB dump candidate at ${url}`);
-    const res = await httpGetText({ fetchAdapter, url });
-    if (res.status === 200 && looksLikeSqlDump(res.body)) {
-      const finding = new Finding({
-        projectId: ctx.project.id,
-        scanJobId: ctx.job.id,
-        targetId: target.id,
-        moduleId: 'exposure.backup.db_dumps',
-        title: 'Exposed database dump',
-        shortDescription: `A probable SQL dump file is accessible at ${url}.`,
-        detailedDescription:
-          'A file that appears to be a SQL database backup is accessible over HTTP. This may contain full application data, including user records and credentials.',
-        severity: 'critical',
-        category: 'exposure',
-        owaspTag: 'A01-Broken-Access-Control',
-      });
-      const evidence = new Evidence({
-        findingId: finding.id,
-        url,
-        method: 'GET',
-        responseStatus: res.status,
-        responseHeadersSnippet: JSON.stringify(res.headers).slice(0, 512),
-        responseBodySnippet: res.body.slice(0, 2048),
-        matchedPattern: 'SQL dump signature (CREATE TABLE / INSERT INTO)',
-      });
-      ctx.addFinding(finding);
-      ctx.addEvidence(evidence);
-      ctx.log(`CRITICAL: probable DB dump exposed at ${url}`);
-    }
+  const mod   = moduleDefById['exposure.backup.db_dumps'];
+  const paths = mod?.configSchema?.properties?.candidateNames?.default || [];
+  for (const p of paths) {
+    const url = baseUrl.replace(/\/$/, '') + p;
+    ctx.log(`Checking DB dump: ${url}`);
+    try {
+      const res = await httpGetText({ fetchAdapter, url });
+      if (res.status === 200 && looksLikeSqlDump(res.body)) {
+        const finding = new Finding({
+          projectId: ctx.project.id, scanJobId: ctx.job.id, targetId: target.id,
+          moduleId: 'exposure.backup.db_dumps',
+          title: 'Exposed Database Dump',
+          shortDescription: `A probable SQL dump is accessible at ${url}.`,
+          detailedDescription: 'A SQL database backup file is accessible over HTTP. May contain full application data including user records and credentials.',
+          severity: 'critical', category: 'exposure',
+          owaspTag: 'A01-Broken-Access-Control', cweTag: 'CWE-200',
+        });
+        ctx.addFinding(finding);
+        ctx.addEvidence(new Evidence({ findingId: finding.id, url, method: 'GET', responseStatus: res.status, responseHeadersSnippet: JSON.stringify(res.headers).slice(0, 512), responseBodySnippet: res.body.slice(0, 2048), matchedPattern: 'SQL dump (CREATE TABLE / INSERT INTO)' }));
+        ctx.log(`🔴 CRITICAL: DB dump exposed at ${url}`);
+      }
+    } catch (e) { ctx.log(`checkDbDumps error: ${e.message || e}`); }
   }
 }
 
+// ── Archives ────────────────────────────────────────────────────────────────────
 async function checkArchives({ ctx, target, baseUrl, fetchAdapter }) {
-  const mod = moduleDefById['exposure.backup.archives'];
-  const paths = (mod.configSchema?.properties?.candidateNames?.default) || [];
-  for (const path of paths) {
-    const url = baseUrl.replace(/\/$/, '') + path;
-    ctx.log(`Checking archive backup at ${url}`);
-    const res = await httpGetText({ fetchAdapter, url });
-    if (res.status === 200 && looksLikeBinaryArchive(res.headers)) {
-      const finding = new Finding({
-        projectId: ctx.project.id,
-        scanJobId: ctx.job.id,
-        targetId: target.id,
-        moduleId: 'exposure.backup.archives',
-        title: 'Exposed backup archive',
-        shortDescription: `A probable backup archive is accessible at ${url}.`,
-        detailedDescription:
-          'A ZIP/TAR archive appears to be accessible, likely containing site or database backups. This can leak full source code or data.',
-        severity: 'high',
-        category: 'exposure',
-        owaspTag: 'A01-Broken-Access-Control',
-      });
-      const evidence = new Evidence({
-        findingId: finding.id,
-        url,
-        method: 'GET',
-        responseStatus: res.status,
-        responseHeadersSnippet: JSON.stringify(res.headers).slice(0, 512),
-        responseBodySnippet: '',
-        matchedPattern: 'Backup archive content-type',
-      });
-      ctx.addFinding(finding);
-      ctx.addEvidence(evidence);
-      ctx.log(`HIGH: probable backup archive exposed at ${url}`);
-    }
+  const mod   = moduleDefById['exposure.backup.archives'];
+  const paths = mod?.configSchema?.properties?.candidateNames?.default || [];
+  for (const p of paths) {
+    const url = baseUrl.replace(/\/$/, '') + p;
+    ctx.log(`Checking archive: ${url}`);
+    try {
+      const res = await httpGetText({ fetchAdapter, url });
+      if (res.status === 200 && looksLikeBinaryArchive(res.headers)) {
+        const finding = new Finding({
+          projectId: ctx.project.id, scanJobId: ctx.job.id, targetId: target.id,
+          moduleId: 'exposure.backup.archives',
+          title: 'Exposed Backup Archive',
+          shortDescription: `A probable backup archive is accessible at ${url}.`,
+          detailedDescription: 'A ZIP/TAR archive is accessible — may contain site backups, source code, or database exports.',
+          severity: 'high', category: 'exposure',
+          owaspTag: 'A01-Broken-Access-Control', cweTag: 'CWE-530',
+        });
+        ctx.addFinding(finding);
+        ctx.addEvidence(new Evidence({ findingId: finding.id, url, method: 'GET', responseStatus: res.status, responseHeadersSnippet: JSON.stringify(res.headers).slice(0, 512), responseBodySnippet: '', matchedPattern: 'Archive content-type' }));
+        ctx.log(`🟠 HIGH: backup archive exposed at ${url}`);
+      }
+    } catch (e) { ctx.log(`checkArchives error: ${e.message || e}`); }
   }
 }
 
+// ── Directory listing ───────────────────────────────────────────────────────────
 async function checkDirListing({ ctx, target, baseUrl, fetchAdapter }) {
-  const mod = moduleDefById['misconfig.dirlisting.generic'];
-  const paths = (mod.configSchema?.properties?.paths?.default) || [];
-  for (const path of paths) {
-    const url = baseUrl.replace(/\/$/, '') + path;
-    ctx.log(`Checking directory listing at ${url}`);
-    const res = await httpGetText({ fetchAdapter, url });
-    if (looksLikeDirListing(res)) {
-      const finding = new Finding({
-        projectId: ctx.project.id,
-        scanJobId: ctx.job.id,
-        targetId: target.id,
-        moduleId: 'misconfig.dirlisting.generic',
-        title: 'Directory listing enabled',
-        shortDescription: `Directory listing appears to be enabled at ${url}.`,
-        detailedDescription:
-          'The web server is returning a directory index for this path, which can expose internal files such as backups, configuration, or code.',
-        severity: 'medium',
-        category: 'misconfig',
-        owaspTag: 'A05-Security-Misconfiguration',
-      });
-      const evidence = new Evidence({
-        findingId: finding.id,
-        url,
-        method: 'GET',
-        responseStatus: res.status,
-        responseHeadersSnippet: JSON.stringify(res.headers).slice(0, 512),
-        responseBodySnippet: res.body.slice(0, 2048),
-        matchedPattern: 'Index of / style listing',
-      });
-      ctx.addFinding(finding);
-      ctx.addEvidence(evidence);
-      ctx.log(`MEDIUM: directory listing detected at ${url}`);
-    }
+  const mod   = moduleDefById['misconfig.dirlisting.generic'];
+  const paths = mod?.configSchema?.properties?.paths?.default || [];
+  for (const p of paths) {
+    const url = baseUrl.replace(/\/$/, '') + p;
+    ctx.log(`Checking dir listing: ${url}`);
+    try {
+      const res = await httpGetText({ fetchAdapter, url });
+      if (looksLikeDirListing(res)) {
+        const finding = new Finding({
+          projectId: ctx.project.id, scanJobId: ctx.job.id, targetId: target.id,
+          moduleId: 'misconfig.dirlisting.generic',
+          title: 'Directory Listing Enabled',
+          shortDescription: `Directory listing appears enabled at ${url}.`,
+          detailedDescription: 'The server returns a directory index for this path, potentially exposing internal files.',
+          severity: 'medium', category: 'misconfig',
+          owaspTag: 'A05-Security-Misconfiguration', cweTag: 'CWE-548',
+        });
+        ctx.addFinding(finding);
+        ctx.addEvidence(new Evidence({ findingId: finding.id, url, method: 'GET', responseStatus: res.status, responseHeadersSnippet: JSON.stringify(res.headers).slice(0, 512), responseBodySnippet: res.body.slice(0, 2048), matchedPattern: 'Index of / listing' }));
+        ctx.log(`🟡 MEDIUM: directory listing at ${url}`);
+      }
+    } catch (e) { ctx.log(`checkDirListing error: ${e.message || e}`); }
   }
 }
 
+// ── .git exposed ─────────────────────────────────────────────────────────────────
 async function checkGitExposed({ ctx, target, baseUrl, fetchAdapter }) {
-  const mod = moduleDefById['vcs.git.exposed'];
-  const paths = (mod.configSchema?.properties?.checkPaths?.default) || [];
-  let any = false;
-  for (const path of paths) {
-    const url = baseUrl.replace(/\/$/, '') + path;
-    ctx.log(`Checking .git component at ${url}`);
-    const res = await httpGetText({ fetchAdapter, url });
-    if (res.status === 200 && res.body.length > 0) {
-      any = true;
-      const finding = new Finding({
-        projectId: ctx.project.id,
-        scanJobId: ctx.job.id,
-        targetId: target.id,
-        moduleId: 'vcs.git.exposed',
-        title: 'Exposed .git repository components',
-        shortDescription: `One or more .git files are accessible (e.g., ${url}).`,
-        detailedDescription:
-          'Parts of the .git directory are accessible over HTTP. Attackers can often reconstruct the entire repository and recover source code and secrets.',
-        severity: 'high',
-        category: 'exposure',
-        owaspTag: 'A05-Security-Misconfiguration',
-      });
-      const evidence = new Evidence({
-        findingId: finding.id,
-        url,
-        method: 'GET',
-        responseStatus: res.status,
-        responseHeadersSnippet: JSON.stringify(res.headers).slice(0, 512),
-        responseBodySnippet: res.body.slice(0, 2048),
-        matchedPattern: '.git file content',
-      });
-      ctx.addFinding(finding);
-      ctx.addEvidence(evidence);
-      ctx.log(`HIGH: .git component exposed at ${url}`);
-      break;
-    }
-  }
-  if (!any) {
-    ctx.log('No exposed .git components detected.');
+  const mod   = moduleDefById['vcs.git.exposed'];
+  const paths = mod?.configSchema?.properties?.checkPaths?.default || [];
+  for (const p of paths) {
+    const url = baseUrl.replace(/\/$/, '') + p;
+    ctx.log(`Checking .git component: ${url}`);
+    try {
+      const res = await httpGetText({ fetchAdapter, url });
+      if (res.status === 200 && res.body.length > 0) {
+        const finding = new Finding({
+          projectId: ctx.project.id, scanJobId: ctx.job.id, targetId: target.id,
+          moduleId: 'vcs.git.exposed',
+          title: 'Exposed .git Repository Components',
+          shortDescription: `One or more .git files are publicly accessible (e.g., ${url}).`,
+          detailedDescription: 'Parts of the .git directory are accessible. Attackers can reconstruct the repository and recover source code and secrets.',
+          severity: 'high', category: 'exposure',
+          owaspTag: 'A05-Security-Misconfiguration', cweTag: 'CWE-200',
+        });
+        ctx.addFinding(finding);
+        ctx.addEvidence(new Evidence({ findingId: finding.id, url, method: 'GET', responseStatus: res.status, responseHeadersSnippet: JSON.stringify(res.headers).slice(0, 512), responseBodySnippet: res.body.slice(0, 2048), matchedPattern: '.git file content' }));
+        ctx.log(`🟠 HIGH: .git exposed at ${url}`);
+        break;
+      }
+    } catch (e) { ctx.log(`checkGitExposed error: ${e.message || e}`); }
   }
 }
 
+// ── Debug errors / stack traces ──────────────────────────────────────────────────
 async function checkDebugErrors({ ctx, target, baseUrl, fetchAdapter }) {
-  const weirdPath = '/this-path-should-not-exist-engine-probe';
-  const url = baseUrl.replace(/\/$/, '') + weirdPath;
-  ctx.log(`Requesting invalid path for debug error detection: ${url}`);
-  const res = await httpGetText({ fetchAdapter, url });
-  if (res.status >= 500 && looksLikeStackTrace(res.body)) {
-    const finding = new Finding({
-      projectId: ctx.project.id,
-      scanJobId: ctx.job.id,
-      targetId: target.id,
-      moduleId: 'debug.stacktraces',
-      title: 'Verbose error / stack trace leakage',
-      shortDescription: 'The application returns detailed error messages or stack traces for invalid requests.',
-      detailedDescription:
-        'A request to an invalid path triggered a detailed error response that appears to contain stack traces or framework internals. This can leak sensitive information about the application and environment.',
-      severity: 'medium',
-      category: 'exposure',
-      owaspTag: 'A05-Security-Misconfiguration',
-    });
-    const evidence = new Evidence({
-      findingId: finding.id,
-      url,
-      method: 'GET',
-      responseStatus: res.status,
-      responseHeadersSnippet: JSON.stringify(res.headers).slice(0, 512),
-      responseBodySnippet: res.body.slice(0, 2048),
-      matchedPattern: 'Stack trace markers',
-    });
-    ctx.addFinding(finding);
-    ctx.addEvidence(evidence);
-    ctx.log('MEDIUM: verbose error / stack trace leakage detected.');
-  } else {
-    ctx.log(`No verbose debug error detected at ${url} (status ${res.status}).`);
-  }
+  const url = baseUrl.replace(/\/$/, '') + '/this-path-should-not-exist-probe-wvc';
+  ctx.log(`Probing debug error page: ${url}`);
+  try {
+    const res = await httpGetText({ fetchAdapter, url });
+    if (res.status >= 500 && looksLikeStackTrace(res.body)) {
+      const finding = new Finding({
+        projectId: ctx.project.id, scanJobId: ctx.job.id, targetId: target.id,
+        moduleId: 'debug.stacktraces',
+        title: 'Verbose Error / Stack Trace Leakage',
+        shortDescription: 'The application returns detailed error pages containing stack traces.',
+        detailedDescription: 'A request to an invalid path triggered a detailed error response containing stack traces. This leaks sensitive information about the application internals.',
+        severity: 'medium', category: 'exposure',
+        owaspTag: 'A05-Security-Misconfiguration', cweTag: 'CWE-209',
+      });
+      ctx.addFinding(finding);
+      ctx.addEvidence(new Evidence({ findingId: finding.id, url, method: 'GET', responseStatus: res.status, responseHeadersSnippet: JSON.stringify(res.headers).slice(0, 512), responseBodySnippet: res.body.slice(0, 2048), matchedPattern: 'Stack trace markers' }));
+      ctx.log(`🟡 MEDIUM: stack trace leakage at ${url}`);
+    } else {
+      ctx.log(`No debug errors at ${url} (status ${res.status})`);
+    }
+  } catch (e) { ctx.log(`checkDebugErrors error: ${e.message || e}`); }
 }
+
+// ── Content detectors ───────────────────────────────────────────────────────────────
 
 function looksLikeDotenv(body) {
-  const lines = body.split(/\r?\n/).slice(0, 40);
-  let pairs = 0;
-  for (const line of lines) {
-    if (/^[A-Z0-9_]+\s*=\s*.+/.test(line)) pairs++;
-  }
-  return pairs >= 3;
+  return body.split(/\r?\n/).slice(0, 40).filter((l) => /^[A-Z0-9_]+=.+/.test(l)).length >= 3;
 }
 
 function looksLikeSqlDump(body) {
-  const snippet = body.slice(0, 4096).toUpperCase();
-  return snippet.includes('CREATE TABLE') || snippet.includes('INSERT INTO');
+  const s = body.slice(0, 4096).toUpperCase();
+  return s.includes('CREATE TABLE') || s.includes('INSERT INTO');
 }
 
 function looksLikeBinaryArchive(headers) {
-  const ct = headers['content-type'] || headers['content-type'.toLowerCase()] || '';
-  return /zip|tar|gzip|octet-stream/i.test(ct);
+  return /zip|tar|gzip|octet-stream/i.test(headers['content-type'] || '');
 }
 
 function looksLikeDirListing(res) {
   if (res.status !== 200) return false;
-  const snippet = res.body.slice(0, 4096).toLowerCase();
-  return snippet.includes('<title>index of /') || snippet.includes('<h1>index of /') || snippet.includes('parent directory');
+  const s = res.body.slice(0, 4096).toLowerCase();
+  return s.includes('<title>index of /') || s.includes('<h1>index of /') || s.includes('parent directory');
 }
 
 function looksLikeStackTrace(body) {
-  const snippet = body.slice(0, 4096);
+  const s = body.slice(0, 4096);
   return (
-    /exception in thread|stack trace|traceback \(most recent call last\)/i.test(snippet) ||
-    /java\.lang\./i.test(snippet) ||
-    /at [\w$.]+\([\w$.]+:\d+\)/.test(snippet)
+    /exception in thread|stack trace|traceback \(most recent call last\)/i.test(s) ||
+    /java\.lang\./i.test(s) ||
+    /at [\w$.]+\([\w$.]+:\d+\)/.test(s)
   );
 }
