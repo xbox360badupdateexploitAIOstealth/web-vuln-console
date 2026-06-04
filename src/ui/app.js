@@ -2,6 +2,7 @@
 import { renderDashboard } from './views/dashboardView.js';
 import { renderProjectList } from './views/projectListView.js';
 import { renderJobConsole } from './views/jobConsoleView.js';
+import { renderFindingsList } from './views/findingsListView.js';
 
 const viewContainer = document.getElementById('view-container');
 const sidebar = document.querySelector('.sidebar');
@@ -18,7 +19,7 @@ function showView(view) {
       renderJobConsole(viewContainer);
       break;
     case 'findings':
-      viewContainer.innerHTML = '<h1>Findings</h1><p>View not implemented yet.</p>';
+      renderFindingsList(viewContainer);
       break;
     case 'modules':
       viewContainer.innerHTML = '<h1>Modules</h1><p>View not implemented yet.</p>';
