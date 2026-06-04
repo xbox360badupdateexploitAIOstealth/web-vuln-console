@@ -1,12 +1,13 @@
 // src/core/engine.js
-// Real scan engine: basic implementation of passive exposure checks
-// and simple active tests using the module definitions and policies.
+// Scan engine: passive exposure + HTML crawl to build SiteModel
+// (injection modules will use SiteModel later).
 
 import { ScanJob, Finding, Evidence } from './models.js';
 import { moduleDefById } from './moduleRegistry.js';
 import { scanPolicyById } from './policyRegistry.js';
 import { SiteModel } from './siteModel.js';
 import { httpGetText } from './httpClient.js';
+import { crawlTargetAndBuildSiteModel } from './crawler.js';
 
 export class EngineConfig {
   constructor({ fetchAdapter, baseUrlResolver }) {
@@ -79,11 +80,21 @@ async function scanTarget({ ctx, target, enabledModules, engineConfig }) {
   ctx.log(`Scanning target ${target.host} (base URL: ${baseUrl})`);
   const siteModel = ctx.getOrCreateSiteModel(target.id);
 
-  // Phase 1: passive exposure checks (env, backups, dirlisting, git, debug, TLS)
+  // Phase 1: passive exposure checks.
   await runPassiveExposureChecks({ ctx, target, baseUrl, siteModel, enabledModules, engineConfig });
 
-  // Phase 2: (later) crawl & injective tests based on siteModel.
-  // For now, we stop after exposure checks.
+  // Phase 2: basic HTML crawl to discover more endpoints.
+  await crawlTargetAndBuildSiteModel({
+    ctx,
+    target,
+    baseUrl,
+    siteModel,
+    engineConfig,
+    maxDepth: 1,
+    maxPages: 20,
+  });
+
+  ctx.log(`SiteModel for ${target.host}: ${siteModel.getAllEndpoints().length} endpoints discovered.`);
 }
 
 async function runPassiveExposureChecks({ ctx, target, baseUrl, siteModel, enabledModules, engineConfig }) {
@@ -117,9 +128,6 @@ async function runPassiveExposureChecks({ ctx, target, baseUrl, siteModel, enabl
   if (expDebug) {
     await checkDebugErrors({ ctx, target, baseUrl, fetchAdapter });
   }
-
-  // TLS headers & security headers module is better run on any fetched response;
-  // for now we just reuse responses we already pulled where relevant.
 }
 
 function moduleEnabled(enabledModules, moduleId) {
@@ -344,7 +352,7 @@ async function checkGitExposed({ ctx, target, baseUrl, fetchAdapter }) {
       ctx.addFinding(finding);
       ctx.addEvidence(evidence);
       ctx.log(`HIGH: .git component exposed at ${url}`);
-      break; // one is enough to report
+      break;
     }
   }
   if (!any) {
