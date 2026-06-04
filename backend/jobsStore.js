@@ -1,119 +1,65 @@
 // backend/jobsStore.js
-// Simple JSON-file-based job store for Termux/VPS backend.
+// Job store — now backed by SQLite via db.js.
+// Keeps the same public API so server.js and worker.js need zero changes.
 
-const fs = require('fs');
-const path = require('path');
-const { config } = require('./config');
+'use strict';
 
-const JOBS_FILE = path.join(config.dataDir, 'jobs.json');
-const RESULTS_FILE = path.join(config.dataDir, 'results.json');
+const { jobs: dbJobs, findings: dbFindings, jobLogs } = require('./db');
 
-function ensureDataDir() {
-  if (!fs.existsSync(config.dataDir)) {
-    fs.mkdirSync(config.dataDir, { recursive: true });
-  }
-}
-
-function readJsonSafe(file, fallback) {
-  try {
-    if (!fs.existsSync(file)) return fallback;
-    const raw = fs.readFileSync(file, 'utf8');
-    if (!raw) return fallback;
-    return JSON.parse(raw);
-  } catch (e) {
-    console.error('Error reading', file, e);
-    return fallback;
-  }
-}
-
-function writeJsonSafe(file, data) {
-  try {
-    fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8');
-  } catch (e) {
-    console.error('Error writing', file, e);
-  }
-}
-
-function loadState() {
-  ensureDataDir();
-  const jobs = readJsonSafe(JOBS_FILE, {});
-  const results = readJsonSafe(RESULTS_FILE, {});
-  // Normalize any jobs left in running state across restarts.
-  for (const jobId of Object.keys(jobs)) {
-    const job = jobs[jobId];
-    if (job.status === 'running') {
-      job.status = 'interrupted';
-      job.updatedAt = new Date().toISOString();
-    }
-  }
-  return { jobs, results };
-}
-
-let state = loadState();
-
-function persist() {
-  writeJsonSafe(JOBS_FILE, state.jobs);
-  writeJsonSafe(RESULTS_FILE, state.results);
-}
+// ── Public API (same shape as before) ─────────────────────────────────────────
 
 function createJob(job) {
-  const now = new Date().toISOString();
-  const id = job.id;
-  state.jobs[id] = {
-    ...job,
-    status: 'queued',
-    createdAt: now,
-    updatedAt: now,
-    progress: 0,
-    error: null,
-  };
-  persist();
-  return state.jobs[id];
+  return dbJobs.create(job);
 }
 
 function listJobs(filter = {}) {
-  const out = [];
-  for (const jobId of Object.keys(state.jobs)) {
-    const job = state.jobs[jobId];
-    if (filter.projectId && job.projectId !== filter.projectId) continue;
-    out.push(job);
-  }
-  // Sort by createdAt desc.
-  out.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-  return out;
+  return dbJobs.list(filter);
 }
 
 function getJob(jobId) {
-  return state.jobs[jobId] || null;
+  return dbJobs.get(jobId);
 }
 
 function updateJob(jobId, patch) {
-  const job = state.jobs[jobId];
-  if (!job) return null;
-  Object.assign(job, patch, { updatedAt: new Date().toISOString() });
-  persist();
-  return job;
+  return dbJobs.update(jobId, patch);
 }
 
+/**
+ * Save all findings + logs from a completed scan job.
+ * ctx = { findings: [...], evidences: [...], logs: [...] }
+ */
 function saveJobResult(jobId, ctx) {
-  state.results[jobId] = {
-    findings: ctx.findings || [],
-    evidences: ctx.evidences || [],
-    logs: ctx.logs || [],
-  };
-  persist();
+  const job = dbJobs.get(jobId);
+  if (!job) return;
+
+  // Persist findings to DB
+  if (Array.isArray(ctx.findings) && ctx.findings.length) {
+    const rows = ctx.findings.map(f => ({
+      ...f,
+      jobId,
+      projectId: job.projectId,
+    }));
+    dbFindings.bulkCreate(rows);
+  }
+
+  // Persist logs to DB
+  if (Array.isArray(ctx.logs)) {
+    ctx.logs.forEach(entry => {
+      const level   = entry.level   || entry.type || 'info';
+      const message = entry.message || entry.text || String(entry);
+      jobLogs.append(jobId, level, message);
+    });
+  }
 }
 
 function getJobResult(jobId) {
-  return state.results[jobId] || { findings: [], evidences: [], logs: [] };
+  const findings  = dbFindings.listByJob(jobId);
+  const logs      = jobLogs.getByJob(jobId);
+  return { findings, evidences: [], logs };
 }
 
 function nextQueuedJob() {
-  const jobs = Object.values(state.jobs).filter((j) => j.status === 'queued');
-  if (!jobs.length) return null;
-  // Oldest first.
-  jobs.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
-  return jobs[0];
+  return dbJobs.nextQueued();
 }
 
 module.exports = {
