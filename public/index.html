@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Web Vuln Console</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="logo">Web Vuln Console</div>
+      <div class="status-indicator">
+        <span class="led led-online"></span> ONLINE
+      </div>
+    </header>
+    <div class="layout">
+      <nav class="sidebar">
+        <button data-view="dashboard">Dashboard</button>
+        <button data-view="projects">Projects</button>
+        <button data-view="jobs">Scan Jobs</button>
+        <button data-view="findings">Findings</button>
+        <button data-view="modules">Modules</button>
+        <button data-view="policies">Policies</button>
+        <button data-view="settings">Settings</button>
+      </nav>
+      <main class="mainpane">
+        <section id="view-container"></section>
+      </main>
+    </div>
+  </div>
+
+  <script type="module" src="../src/ui/app.js"></script>
+</body>
+</html>
