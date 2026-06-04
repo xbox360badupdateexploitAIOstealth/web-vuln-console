@@ -1,29 +1,46 @@
 // backend/utils/severityScore.js
-// Severity scoring and sorting utilities shared across the engine and report generator.
+// Weighted risk score + sort for findings.
+// Score is 0–100. Factors: severity weights, unique categories, total count.
 
-const SEV_RANK = {
-  critical: 1,
-  high:     2,
-  medium:   3,
-  low:      4,
-  info:     5,
+'use strict';
+
+const WEIGHTS = {
+  critical: 30,
+  high:     15,
+  medium:    6,
+  low:       2,
+  info:      0.5,
 };
 
-function rankOf(sev) {
-  return SEV_RANK[sev] || 99;
-}
+const SEV_ORDER = ['critical', 'high', 'medium', 'low', 'info'];
 
-/** Sort findings highest severity first. */
-function sortFindingsBySeverity(findings) {
-  return [...findings].sort((a, b) => rankOf(a.severity) - rankOf(b.severity));
-}
-
-/** Compute a simple risk score (0–100) for a list of findings. */
+/**
+ * Returns a 0–100 risk score for a set of findings.
+ * Caps at 100. Critical findings above 2 give full score immediately.
+ */
 function computeRiskScore(findings) {
   if (!findings || !findings.length) return 0;
-  const weights = { critical: 25, high: 10, medium: 4, low: 1, info: 0 };
-  const raw = findings.reduce((sum, f) => sum + (weights[f.severity] || 0), 0);
-  return Math.min(100, Math.round(raw));
+
+  const raw = findings.reduce((acc, f) => acc + (WEIGHTS[f.severity] || 0), 0);
+  const uniqueCategories = new Set(findings.map((f) => f.category)).size;
+
+  // Bonus for breadth (many different categories = worse)
+  const breadthBonus = Math.min(uniqueCategories * 2, 20);
+
+  const total = Math.min(raw + breadthBonus, 100);
+  return Math.round(total);
 }
 
-module.exports = { rankOf, sortFindingsBySeverity, computeRiskScore };
+/**
+ * Sort findings by severity order then alphabetically by title.
+ */
+function sortFindingsBySeverity(findings) {
+  return [...findings].sort((a, b) => {
+    const ai = SEV_ORDER.indexOf(a.severity);
+    const bi = SEV_ORDER.indexOf(b.severity);
+    if (ai !== bi) return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    return (a.title || '').localeCompare(b.title || '');
+  });
+}
+
+module.exports = { computeRiskScore, sortFindingsBySeverity, WEIGHTS, SEV_ORDER };
