@@ -1,6 +1,6 @@
 // backend/server.js
 // Full HTTP API for WebVulnConsole. Runs on Termux (Android) or any Linux VPS.
-// v2.0.0 — retry endpoint, global stats, scan queue improvements, version bump.
+// v2.1.0 — payload library manager added (TODO-26)
 
 'use strict';
 
@@ -17,6 +17,7 @@ const { requestLogger }       = require('./middleware/requestLogger');
 const { createRateLimiter }   = require('./middleware/rateLimiter');
 const dorksRoute              = require('./routes/dorksRoute');
 const reportsRoute            = require('./routes/reportsRoute');
+const payloadsRoute           = require('./routes/payloadsRoute');
 
 const app = express();
 
@@ -35,11 +36,10 @@ app.use(express.static(path.resolve(__dirname, '../frontend')));
 
 // ─── Health ────────────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', time: new Date().toISOString(), version: '2.0.0', port: config.port });
+  res.json({ status: 'ok', time: new Date().toISOString(), version: '2.1.0', port: config.port });
 });
 
 // ─── Global Stats ─────────────────────────────────────────────────────────────
-// GET /api/stats — dashboard totals: projects, targets, jobs, findings
 app.get('/api/stats', (req, res) => {
   try {
     const { findings: dbFindings } = require('./db');
@@ -50,8 +50,6 @@ app.get('/api/stats', (req, res) => {
     const queued   = allJobs.filter(j => j.status === 'queued').length;
     const completed= allJobs.filter(j => j.status === 'completed').length;
     const failed   = allJobs.filter(j => j.status === 'failed').length;
-
-    // Aggregate findings across all projects
     let totalFindings = 0;
     const sevSummary  = { critical:0, high:0, medium:0, low:0, info:0 };
     allProjects.forEach(p => {
@@ -59,7 +57,6 @@ app.get('/api/stats', (req, res) => {
       Object.keys(sevSummary).forEach(k => { sevSummary[k] += (summary[k] || 0); });
       totalFindings += Object.values(summary).reduce((a, b) => a + b, 0);
     });
-
     res.json({
       projects:  allProjects.length,
       targets:   totalTargets,
@@ -75,13 +72,11 @@ app.get('/api/stats', (req, res) => {
 // PROJECTS
 // ─────────────────────────────────────────────────────────────────────────────
 
-// GET /api/projects — list all projects with stats
 app.get('/api/projects', (req, res) => {
   const list = projects.list().map(p => ({ ...p, ...projects.stats(p.id) }));
   res.json({ projects: list });
 });
 
-// POST /api/projects — create a new project
 app.post('/api/projects', (req, res) => {
   const { name, client, auth_note, contact, scope, status } = req.body || {};
   if (!name) return res.status(400).json({ error: 'name is required' });
@@ -97,14 +92,12 @@ app.post('/api/projects', (req, res) => {
   res.status(201).json(project);
 });
 
-// GET /api/projects/:id — get one project with stats
 app.get('/api/projects/:id', (req, res) => {
   const p = projects.get(req.params.id);
   if (!p) return res.status(404).json({ error: 'project not found' });
   res.json({ ...p, ...projects.stats(p.id) });
 });
 
-// PUT /api/projects/:id — update a project
 app.put('/api/projects/:id', (req, res) => {
   const p = projects.get(req.params.id);
   if (!p) return res.status(404).json({ error: 'project not found' });
@@ -113,7 +106,6 @@ app.put('/api/projects/:id', (req, res) => {
   res.json(updated);
 });
 
-// PATCH /api/projects/:id — partial update (status, notes, etc.)
 app.patch('/api/projects/:id', (req, res) => {
   const p = projects.get(req.params.id);
   if (!p) return res.status(404).json({ error: 'project not found' });
@@ -122,7 +114,6 @@ app.patch('/api/projects/:id', (req, res) => {
   res.json(updated);
 });
 
-// DELETE /api/projects/:id — delete project (cascades to targets/findings)
 app.delete('/api/projects/:id', (req, res) => {
   const ok = projects.delete(req.params.id);
   if (!ok) return res.status(404).json({ error: 'project not found' });
@@ -134,14 +125,12 @@ app.delete('/api/projects/:id', (req, res) => {
 // TARGETS
 // ─────────────────────────────────────────────────────────────────────────────
 
-// GET /api/projects/:id/targets — list targets for a project
 app.get('/api/projects/:id/targets', (req, res) => {
   const p = projects.get(req.params.id);
   if (!p) return res.status(404).json({ error: 'project not found' });
   res.json({ targets: targets.listByProject(req.params.id) });
 });
 
-// POST /api/projects/:id/targets — add one target
 app.post('/api/projects/:id/targets', (req, res) => {
   const p = projects.get(req.params.id);
   if (!p) return res.status(404).json({ error: 'project not found' });
@@ -155,7 +144,6 @@ app.post('/api/projects/:id/targets', (req, res) => {
   res.status(201).json(target);
 });
 
-// POST /api/projects/:id/targets/bulk — add many targets at once
 app.post('/api/projects/:id/targets/bulk', (req, res) => {
   const p = projects.get(req.params.id);
   if (!p) return res.status(404).json({ error: 'project not found' });
@@ -171,7 +159,6 @@ app.post('/api/projects/:id/targets/bulk', (req, res) => {
   res.status(201).json({ added: count });
 });
 
-// DELETE /api/targets/:targetId — remove a target
 app.delete('/api/targets/:targetId', (req, res) => {
   const ok = targets.delete(req.params.targetId);
   if (!ok) return res.status(404).json({ error: 'target not found' });
@@ -183,7 +170,6 @@ app.delete('/api/targets/:targetId', (req, res) => {
 // SCANS
 // ─────────────────────────────────────────────────────────────────────────────
 
-// POST /api/scans — queue a new scan
 app.post('/api/scans', (req, res) => {
   const { projectId, targets: scanTargets, policyId, description } = req.body || {};
   if (!projectId) return res.status(400).json({ error: 'projectId is required' });
@@ -200,28 +186,24 @@ app.post('/api/scans', (req, res) => {
   res.status(202).location(`/api/scans/${jobId}`).json({ jobId, status: job.status });
 });
 
-// GET /api/scans — list all jobs, optional ?projectId= filter
 app.get('/api/scans', (req, res) => {
   const filter = req.query.projectId ? { projectId: req.query.projectId } : {};
   const jobs   = listJobs(filter);
   res.json({ jobs });
 });
 
-// GET /api/scans/:jobId — get one job
 app.get('/api/scans/:jobId', (req, res) => {
   const job = getJob(req.params.jobId);
   if (!job) return res.status(404).json({ error: 'job not found' });
   res.json(job);
 });
 
-// GET /api/scans/:jobId/results — get findings for a completed job
 app.get('/api/scans/:jobId/results', (req, res) => {
   const job = getJob(req.params.jobId);
   if (!job) return res.status(404).json({ error: 'job not found' });
   res.json({ jobId: job.id, status: job.status, ...getJobResult(req.params.jobId) });
 });
 
-// POST /api/scans/:jobId/cancel — cancel a queued/running job
 app.post('/api/scans/:jobId/cancel', (req, res) => {
   const job = getJob(req.params.jobId);
   if (!job) return res.status(404).json({ error: 'job not found' });
@@ -232,7 +214,6 @@ app.post('/api/scans/:jobId/cancel', (req, res) => {
   res.json({ ok: true });
 });
 
-// POST /api/scans/:jobId/retry — re-queue a failed or canceled job
 app.post('/api/scans/:jobId/retry', (req, res) => {
   const job = getJob(req.params.jobId);
   if (!job) return res.status(404).json({ error: 'job not found' });
@@ -254,11 +235,6 @@ app.post('/api/scans/:jobId/retry', (req, res) => {
 // FINDINGS
 // ─────────────────────────────────────────────────────────────────────────────
 
-// GET /api/projects/:id/findings — all findings for a project
-//   ?severity=critical|high|medium|low|info
-//   ?status=open|confirmed|mitigated|false_positive
-//   ?category=XSS|SQLI|...
-//   ?limit=N&offset=N
 app.get('/api/projects/:id/findings', (req, res) => {
   const { findings: dbFindings } = require('./db');
   const { severity, status, category, limit, offset } = req.query;
@@ -267,7 +243,6 @@ app.get('/api/projects/:id/findings', (req, res) => {
   res.json({ findings: list, summary, total: list.length });
 });
 
-// PUT /api/findings/:id/status — update finding status
 app.put('/api/findings/:id/status', (req, res) => {
   const { findings: dbFindings } = require('./db');
   const { status } = req.body || {};
@@ -284,9 +259,10 @@ app.get('/api/audit', (req, res) => {
   res.json({ log: auditLog.recent(limit) });
 });
 
-// ─── Dorks / Reports sub-routers ─────────────────────────────────────────────
+// ─── Sub-routers ─────────────────────────────────────────────────────────────
 app.use('/api/dorks',        dorksRoute);
 app.use('/api/scans/:jobId', reportsRoute);
+app.use('/api/payloads',     payloadsRoute);
 
 // ─── 404 ─────────────────────────────────────────────────────────────────────
 app.use((req, res) => res.status(404).json({ error: `No route: ${req.method} ${req.path}` }));
@@ -302,7 +278,7 @@ app.use((err, req, res, next) => {
 app.listen(config.port, '0.0.0.0', () => {
   console.log('');
   console.log('  ╔══════════════════════════════════════════╗');
-  console.log('  ║   ⚡ WebVulnConsole Backend v2.0.0       ║');
+  console.log('  ║   ⚡ WebVulnConsole Backend v2.1.0       ║');
   console.log(`  ║   API  → http://0.0.0.0:${config.port}             ║`);
   console.log(`  ║   UI   → http://127.0.0.1:${config.port}           ║`);
   console.log('  ║   DB   → SQLite (backend/data/scanner.db)║');
