@@ -1,7 +1,8 @@
 // src/core/engine.js
 // Scan engine: passive exposure + TLS/headers + cookie/session + HTML crawl +
-// JS secret scan + source map detect + cPanel/WHM scan + CVE fingerprints + active injection.
-// v1.6.0 — Phase 1e cveFingerprints wired (TODO-26 CVE checks).
+// JS secret scan + source map detect + cPanel/WHM scan + CVE fingerprints +
+// Laravel .env hunt + active injection.
+// v1.7.0 — Phase 1f laravelEnvHunt wired (TODO-05).
 
 import { ScanJob, Finding, Evidence } from './models.js';
 import { moduleDefById }               from './moduleRegistry.js';
@@ -16,6 +17,7 @@ import { runJsSecretScan }             from './checks/jsSecretScan.js';
 import { runSourceMapDetect }          from './checks/sourceMapDetect.js';
 import { runCPanelWhmScan }            from './checks/cPanelWhm.js';
 import { runCveFingerprints }          from './checks/cveFingerprints.js';
+import { runLaravelEnvHunt }           from './checks/laravelEnv.js';
 
 export class EngineConfig {
   constructor({ fetchAdapter, baseUrlResolver }) {
@@ -82,10 +84,10 @@ async function scanTarget({ ctx, target, enabledModules, engineConfig }) {
   ctx.log(`\n--- Scanning target: ${target.host} (${baseUrl}) ---`);
   const siteModel = ctx.getOrCreateSiteModel(target.id);
 
-  // ── Phase 1: Passive exposure checks ─────────────────────────────────────────────
+  // ── Phase 1: Passive exposure checks ──────────────────────────────────────────────
   await runPassiveExposureChecks({ ctx, target, baseUrl, siteModel, enabledModules, engineConfig });
 
-  // ── Phase 1b: TLS & security headers ──────────────────────────────────────────
+  // ── Phase 1b: TLS & security headers ───────────────────────────────────────────
   if (moduleEnabled(enabledModules, 'tls.headers.basic')) {
     await runTlsHeaderChecks({
       ctx,
@@ -95,7 +97,7 @@ async function scanTarget({ ctx, target, enabledModules, engineConfig }) {
     });
   }
 
-  // ── Phase 1c: Cookie & session security ──────────────────────────────────────
+  // ── Phase 1c: Cookie & session security ───────────────────────────────────────
   if (moduleEnabled(enabledModules, 'cookie.session.flags')) {
     await runCookieSessionChecks({
       ctx,
@@ -105,7 +107,7 @@ async function scanTarget({ ctx, target, enabledModules, engineConfig }) {
     });
   }
 
-  // ── Phase 1d: cPanel / WHM IP scan ───────────────────────────────────────────
+  // ── Phase 1d: cPanel / WHM IP scan ─────────────────────────────────────────────
   if (moduleEnabled(enabledModules, 'exposure.cve.cpanel_whm')) {
     await runCPanelWhmScan({
       ctx,
@@ -117,6 +119,16 @@ async function scanTarget({ ctx, target, enabledModules, engineConfig }) {
   // ── Phase 1e: CVE fingerprint checks ──────────────────────────────────────────
   if (moduleEnabled(enabledModules, 'cve.fingerprints')) {
     await runCveFingerprints({
+      ctx,
+      target,
+      baseUrl,
+      fetchAdapter: engineConfig.fetchAdapter,
+    });
+  }
+
+  // ── Phase 1f: Laravel .env hunt ──────────────────────────────────────────────
+  if (moduleEnabled(enabledModules, 'exposure.cve.laravel_env_hunt')) {
+    await runLaravelEnvHunt({
       ctx,
       target,
       baseUrl,
@@ -191,7 +203,7 @@ function moduleEnabled(mods, id) {
   return mods.some((m) => m.id === id);
 }
 
-// ── .env direct ──────────────────────────────────────────────────────────────────────────
+// ── .env direct ─────────────────────────────────────────────────────────────────────────
 async function checkEnvDirect({ ctx, target, baseUrl, fetchAdapter }) {
   const url = baseUrl.replace(/\/$/, '') + '/.env';
   ctx.log(`Checking direct .env exposure: ${url}`);
@@ -218,7 +230,7 @@ async function checkEnvDirect({ ctx, target, baseUrl, fetchAdapter }) {
   } catch (e) { ctx.log(`checkEnvDirect error: ${e.message || e}`); }
 }
 
-// ── .env variants ────────────────────────────────────────────────────────────────────────
+// ── .env variants ───────────────────────────────────────────────────────────────────────
 async function checkEnvVariants({ ctx, target, baseUrl, fetchAdapter }) {
   const mod   = moduleDefById['exposure.env.variants'];
   const paths = mod?.configSchema?.properties?.paths?.default || [];
@@ -245,7 +257,7 @@ async function checkEnvVariants({ ctx, target, baseUrl, fetchAdapter }) {
   }
 }
 
-// ── DB dumps ────────────────────────────────────────────────────────────────────────
+// ── DB dumps ──────────────────────────────────────────────────────────────────────────
 async function checkDbDumps({ ctx, target, baseUrl, fetchAdapter }) {
   const mod   = moduleDefById['exposure.backup.db_dumps'];
   const paths = mod?.configSchema?.properties?.candidateNames?.default || [];
@@ -272,7 +284,7 @@ async function checkDbDumps({ ctx, target, baseUrl, fetchAdapter }) {
   }
 }
 
-// ── Archives ────────────────────────────────────────────────────────────────────────
+// ── Archives ──────────────────────────────────────────────────────────────────────────
 async function checkArchives({ ctx, target, baseUrl, fetchAdapter }) {
   const mod   = moduleDefById['exposure.backup.archives'];
   const paths = mod?.configSchema?.properties?.candidateNames?.default || [];
