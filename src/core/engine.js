@@ -1,6 +1,7 @@
 // src/core/engine.js
-// Scan engine: passive exposure + TLS/headers + HTML crawl + active injection.
-// v1.2.0 — TLS/headers checker fully wired (Task 3).
+// Scan engine: passive exposure + TLS/headers + cookie/session + HTML crawl +
+// JS secret scan + active injection.
+// v1.3.0 — Phase 1b cookieSession + Phase 2.5 jsSecretScan wired (TODO-01, TODO-02).
 
 import { ScanJob, Finding, Evidence } from './models.js';
 import { moduleDefById }               from './moduleRegistry.js';
@@ -10,6 +11,8 @@ import { httpGetText }                 from './httpClient.js';
 import { crawlTargetAndBuildSiteModel } from './crawler.js';
 import { runActiveInjectionChecks }    from './injection.js';
 import { runTlsHeaderChecks }          from './checks/tlsHeaders.js';
+import { runCookieSessionChecks }      from './checks/cookieSession.js';
+import { runJsSecretScan }             from './checks/jsSecretScan.js';
 
 export class EngineConfig {
   constructor({ fetchAdapter, baseUrlResolver }) {
@@ -76,10 +79,10 @@ async function scanTarget({ ctx, target, enabledModules, engineConfig }) {
   ctx.log(`\n--- Scanning target: ${target.host} (${baseUrl}) ---`);
   const siteModel = ctx.getOrCreateSiteModel(target.id);
 
-  // ── Phase 1: Passive exposure checks ─────────────────────────────────────────
+  // ── Phase 1: Passive exposure checks ──────────────────────────────────────────────
   await runPassiveExposureChecks({ ctx, target, baseUrl, siteModel, enabledModules, engineConfig });
 
-  // ── Phase 1b: TLS & security headers ───────────────────────────────────────
+  // ── Phase 1b: TLS & security headers ───────────────────────────────────────────
   if (moduleEnabled(enabledModules, 'tls.headers.basic')) {
     await runTlsHeaderChecks({
       ctx,
@@ -89,7 +92,17 @@ async function scanTarget({ ctx, target, enabledModules, engineConfig }) {
     });
   }
 
-  // ── Phase 2: HTML crawl to discover endpoints & parameters ─────────────────
+  // ── Phase 1c: Cookie & session security ───────────────────────────────────────
+  if (moduleEnabled(enabledModules, 'cookie.session.flags')) {
+    await runCookieSessionChecks({
+      ctx,
+      target,
+      baseUrl,
+      fetchAdapter: engineConfig.fetchAdapter,
+    });
+  }
+
+  // ── Phase 2: HTML crawl to discover endpoints & parameters ────────────────────
   await crawlTargetAndBuildSiteModel({
     ctx,
     target,
@@ -104,7 +117,18 @@ async function scanTarget({ ctx, target, enabledModules, engineConfig }) {
   const allEps   = siteModel.getAllEndpoints().length;
   ctx.log(`SiteModel: ${allEps} endpoints total, ${paramEps} with parameters.`);
 
-  // ── Phase 3: Active injection checks ─────────────────────────────────────
+  // ── Phase 2.5: JS asset secret scan ────────────────────────────────────────────
+  if (moduleEnabled(enabledModules, 'exposure.js.secrets')) {
+    await runJsSecretScan({
+      ctx,
+      target,
+      siteModel,
+      baseUrl,
+      fetchAdapter: engineConfig.fetchAdapter,
+    });
+  }
+
+  // ── Phase 3: Active injection checks ─────────────────────────────────────────
   await runActiveInjectionChecks({
     ctx,
     target,
@@ -134,7 +158,7 @@ function moduleEnabled(mods, id) {
   return mods.some((m) => m.id === id);
 }
 
-// ── .env direct ─────────────────────────────────────────────────────────────────
+// ── .env direct ──────────────────────────────────────────────────────────────────────────
 async function checkEnvDirect({ ctx, target, baseUrl, fetchAdapter }) {
   const url = baseUrl.replace(/\/$/, '') + '/.env';
   ctx.log(`Checking direct .env exposure: ${url}`);
@@ -161,7 +185,7 @@ async function checkEnvDirect({ ctx, target, baseUrl, fetchAdapter }) {
   } catch (e) { ctx.log(`checkEnvDirect error: ${e.message || e}`); }
 }
 
-// ── .env variants ─────────────────────────────────────────────────────────────
+// ── .env variants ─────────────────────────────────────────────────────────────────────────
 async function checkEnvVariants({ ctx, target, baseUrl, fetchAdapter }) {
   const mod   = moduleDefById['exposure.env.variants'];
   const paths = mod?.configSchema?.properties?.paths?.default || [];
@@ -188,7 +212,7 @@ async function checkEnvVariants({ ctx, target, baseUrl, fetchAdapter }) {
   }
 }
 
-// ── DB dumps ────────────────────────────────────────────────────────────────────
+// ── DB dumps ──────────────────────────────────────────────────────────────────────────
 async function checkDbDumps({ ctx, target, baseUrl, fetchAdapter }) {
   const mod   = moduleDefById['exposure.backup.db_dumps'];
   const paths = mod?.configSchema?.properties?.candidateNames?.default || [];
@@ -215,7 +239,7 @@ async function checkDbDumps({ ctx, target, baseUrl, fetchAdapter }) {
   }
 }
 
-// ── Archives ────────────────────────────────────────────────────────────────────
+// ── Archives ──────────────────────────────────────────────────────────────────────────
 async function checkArchives({ ctx, target, baseUrl, fetchAdapter }) {
   const mod   = moduleDefById['exposure.backup.archives'];
   const paths = mod?.configSchema?.properties?.candidateNames?.default || [];
@@ -242,7 +266,7 @@ async function checkArchives({ ctx, target, baseUrl, fetchAdapter }) {
   }
 }
 
-// ── Directory listing ───────────────────────────────────────────────────────────
+// ── Directory listing ────────────────────────────────────────────────────────────────────
 async function checkDirListing({ ctx, target, baseUrl, fetchAdapter }) {
   const mod   = moduleDefById['misconfig.dirlisting.generic'];
   const paths = mod?.configSchema?.properties?.paths?.default || [];
@@ -269,7 +293,7 @@ async function checkDirListing({ ctx, target, baseUrl, fetchAdapter }) {
   }
 }
 
-// ── .git exposed ─────────────────────────────────────────────────────────────────
+// ── .git exposed ─────────────────────────────────────────────────────────────────────────
 async function checkGitExposed({ ctx, target, baseUrl, fetchAdapter }) {
   const mod   = moduleDefById['vcs.git.exposed'];
   const paths = mod?.configSchema?.properties?.checkPaths?.default || [];
@@ -297,7 +321,7 @@ async function checkGitExposed({ ctx, target, baseUrl, fetchAdapter }) {
   }
 }
 
-// ── Debug errors / stack traces ──────────────────────────────────────────────────
+// ── Debug errors / stack traces ─────────────────────────────────────────────────────────
 async function checkDebugErrors({ ctx, target, baseUrl, fetchAdapter }) {
   const url = baseUrl.replace(/\/$/, '') + '/this-path-should-not-exist-probe-wvc';
   ctx.log(`Probing debug error page: ${url}`);
@@ -322,7 +346,7 @@ async function checkDebugErrors({ ctx, target, baseUrl, fetchAdapter }) {
   } catch (e) { ctx.log(`checkDebugErrors error: ${e.message || e}`); }
 }
 
-// ── Content detectors ───────────────────────────────────────────────────────────────
+// ── Content detectors ──────────────────────────────────────────────────────────────────────
 
 function looksLikeDotenv(body) {
   return body.split(/\r?\n/).slice(0, 40).filter((l) => /^[A-Z0-9_]+=.+/.test(l)).length >= 3;
