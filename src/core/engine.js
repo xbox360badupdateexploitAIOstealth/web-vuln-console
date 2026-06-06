@@ -1,8 +1,8 @@
 // src/core/engine.js
 // Scan engine: passive exposure + TLS/headers + cookie/session + HTML crawl +
 // JS secret scan + source map detect + cPanel/WHM scan + CVE fingerprints +
-// Laravel .env hunt + active injection.
-// v1.7.0 — Phase 1f laravelEnvHunt wired (TODO-05).
+// Laravel .env hunt + CVE passive checks + active injection.
+// v1.8.0 — Phase 1g cvePassive wired (TODO-06).
 
 import { ScanJob, Finding, Evidence } from './models.js';
 import { moduleDefById }               from './moduleRegistry.js';
@@ -18,6 +18,15 @@ import { runSourceMapDetect }          from './checks/sourceMapDetect.js';
 import { runCPanelWhmScan }            from './checks/cPanelWhm.js';
 import { runCveFingerprints }          from './checks/cveFingerprints.js';
 import { runLaravelEnvHunt }           from './checks/laravelEnv.js';
+import {
+  runPhpinfoCheck,
+  runSvnHgCheck,
+  runViteBypassCheck,
+  runMauticEnvCheck,
+  runMoodleListingCheck,
+  runCloudBucketsCheck,
+  runWpDebugCheck,
+} from './checks/cvePassive.js';
 
 export class EngineConfig {
   constructor({ fetchAdapter, baseUrlResolver }) {
@@ -126,7 +135,7 @@ async function scanTarget({ ctx, target, enabledModules, engineConfig }) {
     });
   }
 
-  // ── Phase 1f: Laravel .env hunt ──────────────────────────────────────────────
+  // ── Phase 1f: Laravel .env hunt ───────────────────────────────────────────────
   if (moduleEnabled(enabledModules, 'exposure.cve.laravel_env_hunt')) {
     await runLaravelEnvHunt({
       ctx,
@@ -134,6 +143,29 @@ async function scanTarget({ ctx, target, enabledModules, engineConfig }) {
       baseUrl,
       fetchAdapter: engineConfig.fetchAdapter,
     });
+  }
+
+  // ── Phase 1g: CVE passive checks (TODO-06) ────────────────────────────────────
+  if (moduleEnabled(enabledModules, 'misconfig.phpinfo.exposed')) {
+    await runPhpinfoCheck({ ctx, target, baseUrl, fetchAdapter: engineConfig.fetchAdapter });
+  }
+  if (moduleEnabled(enabledModules, 'vcs.svn_hg.exposed')) {
+    await runSvnHgCheck({ ctx, target, baseUrl, fetchAdapter: engineConfig.fetchAdapter });
+  }
+  if (moduleEnabled(enabledModules, 'exposure.cve.vite_bypass')) {
+    await runViteBypassCheck({ ctx, target, baseUrl, fetchAdapter: engineConfig.fetchAdapter });
+  }
+  if (moduleEnabled(enabledModules, 'exposure.cve.mautic_env')) {
+    await runMauticEnvCheck({ ctx, target, baseUrl, fetchAdapter: engineConfig.fetchAdapter });
+  }
+  if (moduleEnabled(enabledModules, 'exposure.cve.moodle_listing')) {
+    await runMoodleListingCheck({ ctx, target, baseUrl, fetchAdapter: engineConfig.fetchAdapter });
+  }
+  if (moduleEnabled(enabledModules, 'exposure.cloud.open_bucket')) {
+    await runCloudBucketsCheck({ ctx, target, baseUrl, fetchAdapter: engineConfig.fetchAdapter });
+  }
+  if (moduleEnabled(enabledModules, 'exposure.cms.wp_debug')) {
+    await runWpDebugCheck({ ctx, target, baseUrl, fetchAdapter: engineConfig.fetchAdapter });
   }
 
   // ── Phase 2: HTML crawl to discover endpoints & parameters ────────────────────
