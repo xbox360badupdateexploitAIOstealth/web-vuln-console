@@ -180,6 +180,32 @@ export const moduleDefs = [
       },
     },
   }),
+  // ── Passive: Source Map Detection ──────────────────────────────────────────────────────────
+  new ModuleDef({
+    id: 'exposure.sourcemap',
+    name: 'JavaScript Source Map Exposure',
+    description:
+      'Detects publicly accessible JavaScript source map (.map) files. ' +
+      'Checks three vectors per JS asset: (A) direct .map probe, ' +
+      '(B) X-SourceMap / SourceMap HTTP response headers, ' +
+      '(C) //# sourceMappingURL= comments in the JS body. ' +
+      'Validates response is real source map JSON (version:3, sources[] non-empty). ' +
+      'Also flags internal server path leakage in sources[] entries.',
+    category: 'exposure',
+    clazz: 'passive',
+    severityDefault: 'critical',
+    stackFilters: ['any'],
+    owaspTags: ['A05-Security-Misconfiguration'],
+    cweTags: ['CWE-540'],
+    cveExamples: [],
+    configSchema: {
+      type: 'object',
+      properties: {
+        maxJsFiles: { type: 'number', default: 30      },
+        maxMapBytes: { type: 'number', default: 262144 },
+      },
+    },
+  }),
   // ── Passive: Cookie & Session ─────────────────────────────────────────────────────────────────
   new ModuleDef({
     id: 'cookie.session.flags',
