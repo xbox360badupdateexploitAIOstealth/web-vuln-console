@@ -2,191 +2,325 @@
   WEB-VULN-CONSOLE — DEV TRACKER & FEATURE STATUS
   Project: Web Vulnerability Scanner Console
   Repo: xbox360badupdateexploitAIOstealth/web-vuln-console
-  Last Updated: June 4, 2026
+  Last Updated: June 5, 2026
   Status: Active Development — Phase 2/3
+  NOTE: This file is ground-truth. Every entry verified by full repo audit.
 ================================================================================
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   SECTION 1: WHAT HAS BEEN CODED & IS WORKING ✅
+  (Verified by direct file read — June 5 2026)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 [FRONTEND SHELL - WORKING]
-  ✅ index.html — Full dark-terminal console UI shell
-  ✅ style.css — Dark cyberpunk terminal theme, fully responsive
-  ✅ loader.css — Loading animations and spinners
-  ✅ frontend/app.js — ~50KB of frontend logic (largest file, core SPA)
+  ✅ frontend/index.html     — Full dark-terminal console UI shell (9.5 KB)
+  ✅ frontend/style.css      — Dark cyberpunk terminal theme, fully responsive (14 KB)
+  ✅ frontend/loader.css     — Loading animations and spinners (1.2 KB)
+  ✅ frontend/app.js         — ~50 KB core SPA frontend logic (LARGEST FILE)
+  ✅ public/index.html       — Entry point / redirect shell
+  ✅ public/styles.css       — Base styles
 
 [UI VIEWS - WORKING]
-  ✅ dashboardView.js — Main dashboard view skeleton
-  ✅ findingsListView.js — Findings table with status/severity display
-  ✅ jobConsoleView.js — Live job log console view (streaming logs)
-  ✅ projectListView.js — Project list and management view
-  ✅ tos.js — Terms of Service modal + authorization gate (REQUIRED before scanning)
-  ✅ state.js — Global UI state management
-  ✅ src/ui/app.js — UI bootstrap and router
+  ✅ src/ui/app.js               — UI bootstrap and router (1.4 KB)
+  ✅ src/ui/state.js             — Global UI state store (239 B)
+  ✅ src/ui/tos.js               — ToS modal + authorization gate (3.2 KB) — REQUIRED before scanning
+  ✅ src/ui/views/findingsListView.js  — Findings table with status/severity display (5.1 KB)
+  ✅ src/ui/views/jobConsoleView.js    — Live job log console view (3.2 KB)
+  ✅ src/ui/views/projectListView.js   — Project list and management view (1.7 KB)
+  ⚠️ src/ui/views/dashboardView.js     — EXISTS but is skeleton only (633 B) — no real data wired
 
 [BACKEND SERVER - WORKING]
-  ✅ backend/server.js — Express.js HTTP server
-  ✅ backend/config.js — Server config constants (ports, limits, paths)
-  ✅ backend/jobsStore.js — In-memory job queue and tracking store
-  ✅ backend/worker.js — Background worker thread for scan jobs
-  ✅ backend/middleware/rateLimiter.js — Per-IP rate limiter
-  ✅ backend/middleware/requestLogger.js — Request logging middleware
-  ✅ backend/routes/dorksRoute.js — /api/dorks API endpoint
-  ✅ backend/routes/reportsRoute.js — /api/reports API endpoint
+  ✅ backend/server.js           — Express.js HTTP server v1.1.0 (12 KB)
+  ✅ backend/config.js           — Server config constants (715 B)
+  ✅ backend/db.js               — SQLite persistence layer via better-sqlite3 (17.5 KB) — FULLY BUILT
+                                    Includes: projects, targets, findings, evidence, auditLog CRUD
+                                    Cascading deletes, severity summary, bulk target insert all done
+  ✅ backend/jobsStore.js        — In-memory job queue + tracking (1.7 KB)
+  ✅ backend/worker.js           — Background worker thread for scan jobs (2.2 KB)
+  ✅ backend/engine-bridge.js    — Core backend scan bridge (27 KB) — LARGE, duplicates some engine logic
+  ✅ backend/dorkEngine.js       — Google + GitHub dork generator (9.5 KB)
+  ✅ backend/reportGenerator.js  — HTML + Markdown report builder (11 KB)
+  ✅ backend/middleware/rateLimiter.js   — Per-IP rate limiter (1.1 KB)
+  ✅ backend/middleware/requestLogger.js — Request logging middleware (618 B)
+  ✅ backend/routes/dorksRoute.js        — /api/dorks endpoint (430 B)
+  ✅ backend/routes/reportsRoute.js      — /api/reports endpoint (872 B)
+  ✅ backend/utils/normalize.js   — URL/domain normalizer (1.3 KB)
+  ✅ backend/utils/retry.js       — HTTP retry with exponential backoff (1 KB)
+  ✅ backend/utils/severityScore.js — CVSS-style severity scoring (1.4 KB)
+
+[BACKEND API ROUTES - WORKING]
+  ✅ GET  /api/health
+  ✅ GET  /api/projects                       — list all projects with stats
+  ✅ POST /api/projects                       — create project
+  ✅ GET  /api/projects/:id                   — get one project
+  ✅ PUT  /api/projects/:id                   — update project
+  ✅ DELETE /api/projects/:id                 — delete project (cascades)
+  ✅ GET  /api/projects/:id/targets           — list targets for project
+  ✅ POST /api/projects/:id/targets           — add one target
+  ✅ POST /api/projects/:id/targets/bulk      — bulk add targets from array
+  ✅ DELETE /api/targets/:targetId            — remove a target
+  ✅ POST /api/scans                          — start a scan job
+  ✅ GET  /api/scans                          — list jobs
+  ┅ GET  /api/scans/:jobId                   — get job status
+  ✅ GET  /api/scans/:jobId/results           — get job results
+  ✅ POST /api/scans/:jobId/cancel            — cancel a job
+  ✅ GET  /api/projects/:id/findings          — findings list with filters
+  ✅ PUT  /api/findings/:id/status            — update finding status
+  ✅ GET  /api/audit                          — recent audit log
+  ✅ GET  /api/dorks                          — dork generator
 
 [CORE ENGINE - WORKING]
-  ✅ src/core/httpClient.js — Fetch adapter wrapper (browser + Node compatible)
-  ✅ src/core/models.js — Core data model definitions (Finding, Evidence, Job, etc.)
-  ✅ src/core/siteModel.js — Per-target SiteModel object (stores crawled state)
-  ✅ src/core/policyRegistry.js — Scan policy definitions (Normal/Aggressive/Extreme)
-  ✅ src/core/moduleRegistry.js — Module loader, registry, and stack-filter logic
-  ✅ src/core/engine.js — Main scan orchestrator (Phase 1 passive exposure checks LIVE)
-  ✅ src/core/crawler.js — BFS/DFS web crawler (crawls links, forms, assets)
-  ✅ src/core/injection.js — SQLi / XSS / path traversal payload definitions
+  ✅ src/core/engine.js         — Main scan orchestrator v1.2.0 (16 KB)
+                                  Phase 1:  Passive exposure checks → LIVE
+                                  Phase 1b: TLS + security headers → LIVE
+                                  Phase 2:  Crawler → builds SiteModel → LIVE
+                                  Phase 3:  Active injection (SQLi/XSS/traversal) → LIVE
+  ✅ src/core/crawler.js        — BFS/DFS crawler, cheerio (Node) + DOMParser (browser) + regex fallback (5.6 KB)
+                                  Discovers links, forms, query params, saves to SiteModel → WORKING
+  ✅ src/core/httpClient.js     — Fetch adapter wrapper, Node + browser compatible (1.3 KB)
+  ✅ src/core/injection.js      — SQLi / reflected XSS / path traversal FULLY WIRED to engine Phase 3 (6.9 KB)
+  ✅ src/core/models.js         — All data models: Workspace, Project, Target, ScanJob,
+                                  Finding, Evidence, AuditEvent, ModuleDef, ScanPolicy (5.7 KB)
+  ✅ src/core/moduleRegistry.js — 12 registered ModuleDefs (6.9 KB):
+                                  exposure.env.direct, exposure.env.variants,
+                                  exposure.backup.db_dumps, exposure.backup.archives,
+                                  misconfig.dirlisting.generic, vcs.git.exposed,
+                                  debug.stacktraces, injection.sqli.basic,
+                                  injection.xss.reflected_basic, injection.path_traversal.basic,
+                                  tls.headers.basic
+  ✅ src/core/policyRegistry.js — 3 scan policies fully wired (2.5 KB):
+                                  policy_normal     — passive only
+                                  policy_aggressive — passive + SQLi + XSS
+                                  policy_extreme    — ALL modules enabled
+  ✅ src/core/siteModel.js      — Per-target SiteModel: addEndpoint, getParamEndpoints,
+                                  getAllEndpoints, dedup by URL key (2.5 KB)
+  ✅ src/core/checks/tlsHeaders.js — TLS + security headers checker wired to engine Phase 1b (19.8 KB)
 
-[PASSIVE EXPOSURE MODULES - WORKING IN ENGINE]
-  ✅ .env direct exposure check (/.env)
-  ✅ .env variant checks (.env.local, .env.backup, .env.old, .env.bak, .env.prod)
-  ✅ DB dump detection (/backup.sql, /dump.sql, /database.sql, /db.sql)
-  ✅ Archive/backup file exposure (.zip, .tar.gz, .bak)
+[PASSIVE EXPOSURE CHECKS - LIVE IN ENGINE]
+  ✅ /.env direct exposure
+  ✅ .env variants: .env.local, .env.backup, .env.bak, .env.old,
+                   /script/.env, .env.prod, .env.staging, .env.development
+  ✅ DB dump detection: /backup.sql, /db.sql, /dump.sql, /database.sql, /db_backup.sql
+  ✅ Archive exposure: .zip, .tar.gz, site-backup variants
   ✅ Directory listing detection ("Index of /")
-  ✅ .git component exposure (/.git/HEAD, /.git/config)
-  ✅ Verbose debug error detection (stack traces, error pages)
+  ✅ .git component exposure: /.git/HEAD, /.git/config
+  ✅ Verbose debug error / stack trace leakage
+  ✅ TLS checker: plain HTTP detection, HTTPS redirect check
+  ✅ Security headers: HSTS, CSP, X-Content-Type-Options, X-Frame-Options,
+                       Permissions-Policy, Referrer-Policy
+
+[ACTIVE INJECTION CHECKS - LIVE IN ENGINE]
+  ✅ SQL injection (error-based) — 6 payloads, 12 error pattern signatures
+  ✅ Reflected XSS — 4 payloads, raw reflection detection
+  ✅ Path traversal / LFI — Linux + Windows payloads, OS file signature matching
+  All injection checks: OWASP tags + CWE tags + evidence capture on every finding
 
 [DORK ENGINE - WORKING]
-  ✅ backend/dorkEngine.js — Full Google + GitHub dork generator (~9.5KB)
-  ✅ Generates per-domain dork queries as clickable links
+  ✅ Google + GitHub dork generator (9.5 KB)
+  ✅ Per-domain dork queries as clickable links
   ✅ Covers: filetype:env, intitle:index.of, filename:.env, db credentials, API keys
 
-[REPORTING - WORKING]
-  ✅ backend/reportGenerator.js — HTML + Markdown report generator (~11KB)
-  ✅ Generates structured reports with findings, severity, remediation hints
+[REPORTING - PARTIALLY WORKING]
+  ✅ backend/reportGenerator.js — HTML + Markdown report generator (11 KB) — BACKEND WORKS
+  ❌ No UI button to trigger report generation yet
+  ❌ No redacted report mode (strips actual secrets for client sharing)
+  ❌ No PDF export — HTML/Markdown only
+  ❌ No OWASP/CWE/CVE tagging in report output
+  ❌ No executive summary auto-draft
 
-[UTILS - WORKING]
-  ✅ backend/utils/normalize.js — URL/domain normalizer (strips protocol, dedupes)
-  ✅ backend/utils/retry.js — HTTP retry with exponential backoff
-  ✅ backend/utils/severityScore.js — CVSS-style severity scoring
+[DATA PERSISTENCE - WORKING]
+  ✅ backend/db.js — SQLite via better-sqlite3, auto-creates scanner.db
+  ✅ Projects: create, get, list, update, delete (with cascade)
+  ✅ Targets: create, bulk create, list by project, delete
+  ✅ Findings: create, list by project (filterable), update status, severity summary,
+               false positive marking, bulk upsert, get with evidence
+  ✅ Evidence: create, list by finding
+  ✅ AuditLog: write, recent(limit)
+  ⚠️ backend/jobsStore.js — jobs are still IN-MEMORY only (not persisted to db.js)
+  ⚠️ Jobs lost on server restart — findings are saved but job metadata is not
 
 [SETUP]
-  ✅ setup.sh — Full automated setup script for server environment
+  ✅ setup.sh — automated setup script for server/Termux environment
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  SECTION 2: WHAT STILL NEEDS TO BE BUILT / IMPLEMENTED ❌
+  SECTION 2: WHAT STILL NEEDS TO BE BUILT ❌
+  (Verified missing by direct repo audit — June 5 2026)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-[DATA PERSISTENCE - NOT DONE]
-  ❌ backend/data/ folder is EMPTY — no database or persistent storage hooked up
-  ❌ No Firestore / SQLite / PostgreSQL integration yet
-  ❌ Projects, targets, findings, jobs are not persisted across restarts
-  ❌ Evidence objects not stored in any DB (only in-memory during job run)
-  ❌ AuditLog model exists in design but no write logic implemented
+[ENGINE MODULES - NOT BUILT]
+  ❌ src/core/checks/cookieSession.js
+      Cookie security flag checker: HttpOnly, Secure, SameSite flags
+      Session ID entropy / URL exposure check
+      Slot: engine.js Phase 1b (sibling of tlsHeaders.js)
 
-[ACTIVE SCANNING MODULES - NOT DONE]
-  ❌ SQLi active module — payloads defined in injection.js but not wired to engine
-  ❌ XSS reflected probe module — not connected to engine pipeline
-  ❌ Command injection module — not implemented
-  ❌ Path traversal module — payloads exist, no engine integration
-  ❌ SSTI / template injection module — not started
-  ❌ File upload endpoint detection and testing — not started
-  ❌ Extreme Mode scan profile — not wired to a full module run yet
+  ❌ src/core/checks/jsSecretScan.js
+      Fetch .js assets discovered by crawler
+      Regex scan for: AKIA, sk-, AIza, Bearer tokens, Firebase config, Stripe keys
+      Slot: engine.js Phase 2.5 (after crawl, before injection)
 
-[CRAWLER - PARTIAL]
-  ❌ crawler.js exists but not fully integrated into engine.js Phase 2 flow
-  ❌ Parameter inventory (form fields, query params, headers) not saved to SiteModel yet
-  ❌ JavaScript asset parsing for hardcoded secrets not implemented
-  ❌ Source map / .map file detection not implemented
+  ❌ src/core/checks/sourceMapDetect.js
+      For every .js URL found by crawler, probe URL + '.map'
+      Check if response is valid JSON with 'sources' key
+      Exposes original unminified source code
+      Slot: engine.js Phase 2.5 alongside jsSecretScan
 
-[AUTH / SESSION MODULES - NOT DONE]
-  ❌ Cookie security flag checker (HttpOnly, Secure, SameSite) — not implemented
-  ❌ Session ID quality check (entropy, URL exposure) — not implemented
-  ❌ Login page detection + no-rate-limit detection — not implemented
-  ❌ TLS / HTTPS configuration checker — not implemented
-  ❌ HTTP security headers analysis (HSTS, CSP, X-Frame-Options) — not implemented
+  ❌ Advanced CVE pattern passive checks (add to engine.js + moduleRegistry.js)
+      phpinfo.php / /debug / /_profiler endpoints
+      /.svn/entries, /.hg/manifest (SVN/Mercurial metadata exposure)
+      Dokans /script/.env (CVE-2025-70841 pattern)
+      Laravel artisan + APP_KEY extraction (CVE-2024-55556 pattern)
+      Vite dev server /@fs/ bypass (CVE-2025-46565 pattern)
+      Mautic env exposure pattern (CVE-2024-47056 inspired)
+      Moodle router directory listing (CVE-2025-62396 pattern)
+      Cloud bucket misconfiguration: S3 / Azure open bucket detection
 
-[ADVANCED EXPOSURE MODULES - NOT DONE]
-  ❌ Framework-specific .env path checks (Dokans /script/.env CVE-2025-70841)
-  ❌ Laravel APP_KEY extraction + RCE risk flagging (CVE-2024-55556 pattern)
-  ❌ Mautic env exposure pattern (CVE-2024-47056 inspired)
-  ❌ Vite dev server env bypass check (CVE-2025-46565 pattern)
-  ❌ Moodle router directory listing (CVE-2025-62396 pattern)
-  ❌ phpinfo.php / /debug endpoint detection
-  ❌ SVN / Mercurial metadata exposure (/.svn/, /.hg/)
-  ❌ Front-end JS secret scanning (API keys, Bearer tokens in bundles)
-  ❌ Admin/internal URL harvesting from JS/HTML
-  ❌ Cloud storage misconfiguration detection (S3/Azure bucket leaks)
+  ❌ injection.js additions needed:
+      Command injection module (not in registry, not in engine)
+      SSTI / template injection module (not started)
+      File upload endpoint detection + test probes
 
-[VIEWS - NOT DONE / SKELETON ONLY]
-  ❌ dashboardView.js — only skeleton, needs real stats/charts wired to data
-  ❌ Targets management view — no add/edit/delete target UI fully built
-  ❌ Module catalog view — not implemented (modules not browsable in UI)
-  ❌ Policy editor UI — policyRegistry.js exists but no UI to edit policies
-  ❌ Workspace/project hierarchy view — flat project list only, no workspaces
-  ❌ Finding detail side-panel — needs evidence, reproduction steps, OWASP tags
-  ❌ Report preview/export UI — backend generator exists, no UI trigger
+  ❌ moduleRegistry.js additions needed:
+      ModuleDef entries for all new checks above
+      ModuleDef for cookie.session.flags
+      ModuleDef for exposure.js.secrets
+      ModuleDef for exposure.sourcemap
+      ModuleDef for all CVE pattern modules
+      ModuleDef for injection.cmdi.basic
+      ModuleDef for injection.ssti.basic
+      ModuleDef for injection.fileupload.detect
 
-[INTEGRATIONS - NOT STARTED]
-  ❌ ZAP connector (API/Docker wrapper) — not started
-  ❌ Metasploit RPC connector — not started
-  ❌ Nmap CLI output parser/connector — not started
-  ❌ GitHub API integration for org/repo dorking automation — not started
+[DATA / JOBS - PARTIAL GAP]
+  ⚠️ backend/jobsStore.js — jobs are in-memory only
+      Jobs not written to db.js — lost on restart
+      Fix: add jobs table to db.js + update jobsStore to persist
 
-[SCAN SCHEDULING - NOT STARTED]
-  ❌ Scheduled scans (daily/weekly/monthly) — not started
-  ❌ Scan timeline / calendar view — not started
-  ❌ Re-run / clone scan job UI — not implemented
-
-[CORRELATION ENGINE - NOT STARTED]
-  ❌ Finding grouping / correlation logic — not started
-  ❌ "Related findings" linking (same secret reused in multiple places) — not started
-  ❌ Severity escalation via correlation rules — not started
+[UI VIEWS - NOT DONE / SKELETON ONLY]
+  ❌ dashboardView.js — skeleton (633 B), needs real stats + charts from API
+  ❌ Finding detail side-panel
+      Evidence display (request/response snippets)
+      Reproduction steps
+      OWASP + CWE tag display
+      Remediation guidance text
+  ❌ Targets management view — no add/edit/delete target UI built
+  ❌ Module catalog view — modules not browsable in UI
+  ❌ Policy editor UI — policyRegistry.js exists, no UI to edit/select policies
+  ❌ Report preview / export UI button — reportGenerator.js works, no trigger
+  ❌ Workspace / project hierarchy view — flat project list only
 
 [REPORTING - PARTIAL]
-  ❌ No UI trigger for report generation yet
-  ❌ No OWASP/CWE/CVE tagging on findings in report output
-  ❌ No "Executive summary" auto-draft
-  ❌ No PDF export — only Markdown/HTML
-  ❌ No redacted report mode (strips actual secrets for client sharing)
+  ❌ UI button to trigger report generation
+  ❌ OWASP/CWE/CVE tagging in report output
+  ❌ Executive summary auto-draft
+  ❌ PDF export (HTML/MD only right now)
+  ❌ Redacted report mode (strips secrets for client sharing)
+
+[ARCHITECTURE GAP - NEEDS RECONCILIATION]
+  ⚠️ backend/engine-bridge.js (27 KB) duplicates scan logic from src/core/engine.js
+      Two separate code trees doing similar work:
+        /src/core/ = modular engine (engine.js, injection.js, crawler.js, registry)
+        /backend/  = engine-bridge.js doing its own scan orchestration
+      Fix: engine-bridge.js should import and delegate to src/core/engine.js
+      src/core/ becomes single source of truth for all scan logic
+      backend/ stays as HTTP API wrapper only
+
+[INTEGRATIONS - NOT STARTED]
+  ❌ ZAP connector (API/Docker wrapper)
+  ❌ Metasploit RPC connector
+  ❌ Nmap CLI output parser
+  ❌ GitHub API integration for org/repo dorking automation
+  ❌ Subdomain enumeration (crt.sh Certificate Transparency + DNS wordlist)
+  ❌ API endpoint discovery (Swagger/OpenAPI spec at /api-docs, /swagger.json)
+
+[SCAN SCHEDULING - NOT STARTED]
+  ❌ Scheduled scans (daily/weekly/monthly)
+  ❌ Scan timeline / calendar view
+  ❌ Re-run / clone scan job UI
+  ❌ Per-scan diff mode (compare current vs previous scan findings)
+
+[CORRELATION ENGINE - NOT STARTED]
+  ❌ Finding grouping / correlation logic
+  ❌ Related findings linking (same secret reused across multiple endpoints)
+  ❌ Severity escalation via correlation rules
 
 [MULTI-WORKER ARCHITECTURE - NOT STARTED]
-  ❌ Local agent mode (localhost:7777 worker) — not started
-  ❌ VPS worker agent API — not started
-  ❌ Android/Termux worker support — not started
-  ❌ Worker selector in UI ("Run on VPS / Local / Phone") — not started
+  ❌ Local agent mode (localhost:7777 worker)
+  ❌ VPS worker agent API
+  ❌ Android/Termux worker support
+  ❌ Worker selector in UI ("Run on VPS / Local / Phone")
 
 [AUTH / MULTI-USER - NOT STARTED]
-  ❌ User authentication — not started
-  ❌ Role system (owner/analyst/view-only) — not started
-  ❌ Per-project multi-user access — not started
-  ❌ Client portal login (future) — not started
+  ❌ User authentication
+  ❌ Role system (owner/analyst/view-only)
+  ❌ Per-project multi-user access
+  ❌ Client portal login
 
 [MISC / POLISH - NOT DONE]
-  ❌ CLI client (scanner add-target, scanner run-scan etc.) — not started
-  ❌ REST API documentation — not started
-  ❌ Module versioning / ruleset versioning — not started
-  ❌ Import/export of rulesets and policies — not started
-  ❌ "Playbook" templates per finding category — not started
-  ❌ Script snippet library panel (Python/Bash one-liners) — not started
-  ❌ LLM-assisted finding summarization — not started
-  ❌ Electron/Tauri desktop wrapper — not started
-  ❌ Testing harness against DVWA/Mutillidae lab targets — not started
+  ❌ WebSocket live job feed (currently polling-based)
+  ❌ Mobile PWA mode (installable on Android/iOS)
+  ❌ CLI client (scanner add-target, scanner run-scan)
+  ❌ REST API documentation
+  ❌ Screenshot capture on critical findings (headless browser)
+  ❌ Notification system (Slack/Discord webhook on critical finding)
+  ❌ Evidence Vault (encrypted storage, lock project at point-in-time)
+  ❌ LLM-assisted finding summarization
+  ❌ Electron/Tauri desktop wrapper
+  ❌ Testing harness against DVWA/Mutillidae lab targets
+  ❌ Module versioning / ruleset versioning
+  ❌ Import/export of rulesets and policies
+  ❌ Playbook templates per finding category
+  ❌ Script snippet library panel (Python/Bash one-liners)
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  SECTION 3: IMMEDIATE PRIORITY ITEMS (DO THESE FIRST) 🔥
+  SECTION 3: IMMEDIATE PRIORITY BUILD ORDER 🔥
+  (Ordered to minimize overlap risk and catch bugs early)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  P1.  Wire crawler.js output into engine.js Phase 2 properly
-  P2.  Connect injection.js payloads to engine active module pipeline
-  P3.  Implement data persistence (SQLite — no setup needed, just a file)
-  P4.  Build TLS/header security checker module (easy wins for client reports)
-  P5.  Add cookie security flag checker module
-  P6.  Wire report generation to a UI button (reportGenerator.js already works!)
-  P7.  Build module catalog view so you can see all modules in UI
-  P8.  Add OWASP/CWE tags to Finding model output
-  P9.  Implement finding detail panel with evidence + remediation text
-  P10. Add Extreme Mode toggle that enables all active modules
+  STEP 1.  src/core/checks/cookieSession.js
+           New file, zero overlap. Sibling of tlsHeaders.js.
+           Add 1 import + 1 moduleEnabled() call to engine.js Phase 1b.
+           Add ModuleDef to moduleRegistry.js.
+
+  STEP 2.  src/core/checks/jsSecretScan.js
+           New file. Reads .js URLs from SiteModel (crawler already saves them).
+           Add to engine.js Phase 2.5 (after crawl, before injection).
+           Add ModuleDef to moduleRegistry.js.
+
+  STEP 3.  src/core/checks/sourceMapDetect.js
+           New file. Sibling of jsSecretScan.js. Probes url+'.map' for each .js asset.
+           Add to engine.js Phase 2.5 alongside jsSecretScan.
+           Add ModuleDef to moduleRegistry.js.
+
+  STEP 4.  CVE pattern passive checks in engine.js
+           Add checkPhpinfo(), checkSvnHg(), checkDokanEnv(), checkLaravelArtisan(),
+           checkViteBypass(), checkMauticEnv(), checkMoodleListing(), checkCloudBuckets()
+           to runPassiveExposureChecks() in engine.js.
+           Add corresponding ModuleDefs to moduleRegistry.js.
+           Zero structural change to engine — pure additive.
+
+  STEP 5.  Persist jobs in db.js
+           Add jobs table to backend/db.js.
+           Update backend/jobsStore.js to write/read from db instead of memory.
+           Zero API changes — server.js routes unchanged.
+
+  STEP 6.  Report generation UI button
+           Wire frontend button to call GET /api/scans/:jobId/report.
+           reportGenerator.js already works on backend.
+           One button + one fetch call in frontend/app.js.
+
+  STEP 7.  Finding detail side-panel (UI)
+           Expand findingsListView.js to show evidence, OWASP tag,
+           CWE tag, remediation text on row click.
+           Data already available via GET /api/projects/:id/findings.
+
+  STEP 8.  Dashboard stats wired to real data
+           Replace dashboardView.js skeleton with real API calls.
+           Findings severity summary, job count, project count all available in API.
+
+  STEP 9.  engine-bridge.js → src/core/engine.js unification
+           Refactor engine-bridge.js to delegate scan execution to src/core/engine.js.
+           Eliminates logic duplication. Biggest structural change — do last.
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -194,118 +328,117 @@
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   IDEA-01: CVE Pattern Tag Engine
-    - When a finding matches known CVE pattern (Dokans, Vite, Mautic, Moodle, Laravel)
-      auto-label the finding: "Matches CVE-YYYY-XXXXX pattern"
-    - Huge value for client reports — real documented vuln not theoretical
+    Auto-label findings that match known CVE patterns: "Matches CVE-YYYY-XXXXX pattern"
+    Huge value for client reports.
 
-  IDEA-02: Finding "Risk Score" Dashboard Widget
-    - Calculate a project risk score (0-100) like CVSS score for entire project
-    - Visual ring/gauge on dashboard showing total exposure level
-    - Color: green=safe, yellow=moderate, red=critical, DARK RED=evacuate
+  IDEA-02: Risk Score Dashboard Widget
+    Project risk score (0-100), visual ring/gauge
+    Color: green=safe, yellow=moderate, red=critical, dark red=evacuate
 
-  IDEA-03: Passive Recon "Ghost Mode"
-    - A mode that ONLY uses dorks + passive reads, never sends a probe to target
-    - No footprint on target at all — 100% stealth
-    - Useful for initial recon before client has signed off fully
+  IDEA-03: Ghost Mode (Passive Recon Only)
+    Dorks + passive reads only — zero probes sent to target
+    100% stealth — useful before client authorization signed
 
   IDEA-04: Target Import from File
-    - Upload a .txt or .csv with list of domains/IPs
-    - Auto-normalize and add to project targets in bulk
-    - Needed for datacenter clients with 100+ assets
+    Upload .txt / .csv with list of domains/IPs
+    Auto-normalize and bulk add to project
+    NOTE: /api/projects/:id/targets/bulk already exists on backend
 
-  IDEA-05: "Live Threat Intel" Badge on Findings
-    - When .env exposure found, show badge: "Actively exploited by bots at scale"
-    - Reference GreyNoise / Shodan threat intel context
-    - Makes reports way more convincing for clients who need to see urgency
+  IDEA-05: Live Threat Intel Badge
+    When .env exposure found, show: "Actively exploited by bots at scale"
+    Reference GreyNoise / Shodan context
 
   IDEA-06: Scope Lock System
-    - Define scope boundaries per project: only scan *.example.com
-    - Crawler/engine auto-rejects any URL outside defined scope
-    - Prevents accidental out-of-scope scanning
+    Define scope per project: only scan *.example.com
+    Crawler auto-rejects out-of-scope URLs
 
   IDEA-07: Screenshot Capture on Critical Findings
-    - When critical finding found (exposed .env, SQL dump etc.)
-    - Headless browser captures screenshot of the URL as evidence
-    - Auto-attach to report like a bug bounty writeup
+    Headless browser screenshot when critical finding found
+    Auto-attach to report as evidence
 
-  IDEA-08: Findings Status Kanban Board
-    - Open → Confirmed → Mitigated → False Positive
-    - Drag and drop cards per finding
-    - Track remediation progress per project
+  IDEA-08: Findings Kanban Board
+    Open → Confirmed → Mitigated → False Positive
+    Drag and drop cards per finding
+    NOTE: status field + PUT /api/findings/:id/status already exists
 
   IDEA-09: Per-Scan Diff Mode
-    - Compare current scan vs previous scan findings
-    - Show: NEW findings (red), FIXED findings (green), UNCHANGED (grey)
-    - Critical for recurring client assessments
+    Compare current vs previous scan: NEW (red), FIXED (green), UNCHANGED (grey)
+    Critical for recurring client assessments
 
-  IDEA-10: "Dork Assistant" Chatbot Panel
-    - In-app panel where you type a target type (e.g. "WordPress hosting")
-    - Returns top 10 dork queries to run right now
-    - Smart dork suggester based on stack fingerprint
+  IDEA-10: Dork Assistant Panel
+    In-app panel: type target type → get top 10 dork queries
+    Stack-fingerprint aware
 
   IDEA-11: Mobile PWA Mode
-    - Make the app installable as a PWA on Android/iOS
-    - Offline-capable for viewing saved findings without server
+    Installable on Android/iOS, offline-capable for viewing saved findings
 
   IDEA-12: Header Fingerprint Database
-    - Maintain a mini DB of server/framework response header signatures
-    - Auto-detect: Laravel, WordPress, Django, Rails, ASP.NET, Spring Boot
-    - More accurate stack fingerprinting = better module selection
+    Mini DB of server/framework response header signatures
+    Auto-detect: Laravel, WordPress, Django, Rails, ASP.NET, Spring Boot
 
   IDEA-13: WebSocket Live Job Feed
-    - Replace polling-based job status with WebSocket
-    - True real-time streaming logs like a terminal with zero lag
+    Replace polling with true real-time WebSocket log stream
 
   IDEA-14: Quick-Launch Scan Templates
-    - Pre-built scan configs: "WordPress Full Audit", "API Backend Check", "Laravel Env Hunt"
-    - One click to run a purpose-built scan package
+    Pre-built configs: "WordPress Full Audit", "API Backend Check", "Laravel Env Hunt"
 
-  IDEA-15: OWASP Top 10 2025 Full Coverage Checklist
-    - Visual checklist per project showing which OWASP Top 10 categories are tested
-    - Green checkmark = module covers it, Red X = not tested yet
-    - Great for client deliverables showing coverage
+  IDEA-15: OWASP Top 10 2025 Coverage Checklist
+    Visual checklist per project: green=covered, red=not tested
+    Great for client deliverables
 
   IDEA-16: Subdomain Enumeration Module
-    - Passive: Certificate Transparency logs (crt.sh API)
-    - Passive: DNS brute-force wordlist (top 500 subdomains)
-    - Auto-add discovered subdomains as new targets in same project
+    crt.sh Certificate Transparency logs (passive)
+    DNS wordlist brute-force (top 500 subdomains)
+    Auto-add discovered subdomains as new targets
 
-  IDEA-17: API Endpoint Discovery Module
-    - Look for Swagger/OpenAPI spec at /api-docs, /swagger.json, /openapi.yaml
-    - Auto-import all endpoints as scan targets
-    - Run injection/auth modules against each endpoint
+  IDEA-17: API Endpoint Discovery
+    Probe /api-docs, /swagger.json, /openapi.yaml
+    Auto-import all endpoints as scan targets
 
   IDEA-18: Custom Payload Library Manager
-    - UI to add/edit/remove payloads per module (SQLi, XSS, traversal etc.)
-    - Import/export payload lists (compatible with SecLists format)
+    UI to add/edit/remove payloads per module
+    Import/export compatible with SecLists format
 
   IDEA-19: Notification System
-    - Email or webhook alert when critical finding is discovered
-    - Slack/Discord webhook support (one config line)
+    Slack/Discord webhook on critical finding
+    Email alert support
 
   IDEA-20: Evidence Vault
-    - Encrypted local storage for all raw HTTP evidence
-    - Full request/response stored for legal proof
-    - "Lock" a project to freeze evidence at point-in-time for reporting
+    Encrypted local storage for full HTTP request/response evidence
+    Lock project at point-in-time for legal reporting
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   SECTION 5: ARCHITECTURE NOTES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  TWO PARALLEL CODE TREES EXIST — NEEDS RECONCILIATION:
-    - /src/core/  = newer modular engine system (engine.js, modules, registry)
-    - /backend/   = older Express server + engine-bridge.js approach
+  TWO PARALLEL CODE TREES — NEEDS RECONCILIATION:
 
-  Recommended unification path:
-    - backend/engine-bridge.js should IMPORT from src/core/engine.js
-    - src/core/ becomes the single source of truth for all scan logic
-    - backend/ stays as the HTTP API wrapper only
+    /src/core/     = newer modular engine system
+                     engine.js, injection.js, crawler.js, siteModel.js,
+                     moduleRegistry.js, policyRegistry.js, checks/
+                     → This is the CORRECT architecture going forward
 
-  CORS Strategy:
-    - Browser-only scanning = limited by CORS sandbox
-    - Recommended: local Node agent on port 7777 OR full VPS backend
-    - engine.js + httpClient.js adapter design already supports both modes
+    /backend/      = Express HTTP API + engine-bridge.js doing its own scan logic
+                     engine-bridge.js (27 KB) currently duplicates orchestration
+                     that already exists in src/core/engine.js
+
+  RECOMMENDED UNIFICATION PATH:
+    1. engine-bridge.js imports runScanJob from src/core/engine.js
+    2. engine-bridge.js becomes a thin adapter (format input, relay output to db.js)
+    3. src/core/ is single source of truth for all scan logic
+    4. backend/ stays as HTTP API + DB layer only
+    NOTE: Do this LAST (Step 9) — it’s the biggest structural change
+
+  CORS / DEPLOYMENT STRATEGY:
+    Browser-only scanning is limited by CORS sandbox
+    Recommended: local Node agent on port 7777 OR full VPS backend
+    engine.js + httpClient.js adapter design already supports both modes
+
+  DB FILE LOCATION:
+    backend/data/scanner.db (auto-created by better-sqlite3 on first run)
+    backend/data/ exists in repo as empty placeholder (.gitkeep)
+    .gitignore should exclude scanner.db from commits (verify this is set)
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
