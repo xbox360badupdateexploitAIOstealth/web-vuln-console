@@ -14,7 +14,7 @@ function cloneOverrides(o) {
   return JSON.parse(JSON.stringify(o));
 }
 
-// ── Normal: passive-only ──────────────────────────────────────────────────────
+// ── Normal: passive-only ────────────────────────────────────────────────────────
 const overridesNormal = baseOverrides();
 [
   'exposure.env.direct',
@@ -25,6 +25,10 @@ const overridesNormal = baseOverrides();
   'vcs.git.exposed',
   'debug.stacktraces',
   'tls.headers.basic',
+  'cookie.session.flags',
+  'exposure.js.secrets',
+  'exposure.sourcemap',
+  'cve.fingerprints',
 ].forEach((id) => {
   if (overridesNormal[id]) {
     overridesNormal[id].enabled       = true;
@@ -37,6 +41,7 @@ const overridesAggressive = cloneOverrides(overridesNormal);
 [
   'injection.sqli.basic',
   'injection.xss.reflected_basic',
+  'injection.path_traversal.basic',
 ].forEach((id) => {
   if (overridesAggressive[id]) {
     overridesAggressive[id].enabled       = true;
@@ -44,7 +49,7 @@ const overridesAggressive = cloneOverrides(overridesNormal);
   }
 });
 
-// ── Extreme: all modules — full active suite ──────────────────────────────────
+// ── Extreme: all modules — full active suite ─────────────────────────────────
 const overridesExtreme = baseOverrides();
 for (const m of moduleDefs) {
   overridesExtreme[m.id].enabled       = true;
@@ -56,7 +61,8 @@ export const scanPolicies = [
     id: 'policy_normal',
     name: 'Normal (Passive Only)',
     description:
-      'Low-impact passive scanning: exposed files, backups, .git, directory listings, TLS headers. ' +
+      'Low-impact passive scanning: exposed files, backups, .git, directory listings, TLS headers, ' +
+      'cookie/session flags, JS secret scan, source map detection, and CVE fingerprints (2025–2026). ' +
       'Zero active probes — safe for production systems.',
     moduleOverrides: overridesNormal,
     globalLimits: {
@@ -69,7 +75,7 @@ export const scanPolicies = [
     id: 'policy_aggressive',
     name: 'Aggressive (Passive + Basic Injection)',
     description:
-      'Adds basic SQLi and reflected XSS probes on top of all passive checks. ' +
+      'All passive checks (including CVE fingerprints) plus basic SQLi, reflected XSS, and path traversal. ' +
       'Only use on systems you are authorized to test actively.',
     moduleOverrides: overridesAggressive,
     globalLimits: {
@@ -82,7 +88,7 @@ export const scanPolicies = [
     id: 'policy_extreme',
     name: 'Extreme (Full Suite — All Modules)',
     description:
-      'Enables every module including path traversal, active fuzzing, and deep injection. ' +
+      'Enables every module including path traversal, active fuzzing, deep injection, and all CVE fingerprints. ' +
       'Intended ONLY for authorized lab or dedicated pentest environments.',
     moduleOverrides: overridesExtreme,
     globalLimits: {
