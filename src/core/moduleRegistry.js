@@ -2,7 +2,7 @@
 import { ModuleDef } from './models.js';
 
 export const moduleDefs = [
-  // ── Passive: Exposure ──────────────────────────────────────────────────────
+  // ── Passive: Exposure ──────────────────────────────────────────────────────────────────────────
   new ModuleDef({
     id: 'exposure.env.direct',
     name: 'Direct .env Exposure',
@@ -157,7 +157,56 @@ export const moduleDefs = [
       },
     },
   }),
-  // ── Active: Injection ──────────────────────────────────────────────────────
+  // ── Passive: JS Secret Scan ──────────────────────────────────────────────────────────────────
+  new ModuleDef({
+    id: 'exposure.js.secrets',
+    name: 'JavaScript Asset Secret Scanner',
+    description:
+      'Fetches all .js assets discovered by the crawler and scans them for hardcoded secrets: ' +
+      'AWS keys, Stripe live keys, Google API keys, Firebase config, GitHub PATs, Slack tokens, ' +
+      'OpenAI/HuggingFace/Replicate API keys, Bearer tokens, PEM private keys, and secret variable assignments.',
+    category: 'exposure',
+    clazz: 'passive',
+    severityDefault: 'critical',
+    stackFilters: ['any'],
+    owaspTags: ['A02-Cryptographic-Failures'],
+    cweTags: ['CWE-312', 'CWE-798'],
+    cveExamples: [],
+    configSchema: {
+      type: 'object',
+      properties: {
+        maxJsFiles: { type: 'number',  default: 30     },
+        maxBytes:   { type: 'number',  default: 524288 },
+      },
+    },
+  }),
+  // ── Passive: Cookie & Session ─────────────────────────────────────────────────────────────────
+  new ModuleDef({
+    id: 'cookie.session.flags',
+    name: 'Cookie & Session Security Checks',
+    description:
+      'Deep cookie and session security analysis. Covers: SameSite=None without Secure, ' +
+      'session ID entropy (short/numeric/predictable tokens), overly long Max-Age on session cookies, ' +
+      '__Secure- and __Host- prefix requirement violations, broad Domain= scope leaking tokens ' +
+      'to subdomains, and session tokens exposed in URL query parameters.',
+    category: 'misconfig',
+    clazz: 'passive',
+    severityDefault: 'high',
+    stackFilters: ['any'],
+    owaspTags: ['A07-Identification-and-Authentication-Failures'],
+    cweTags: ['CWE-539', 'CWE-331', 'CWE-613', 'CWE-598'],
+    cveExamples: [],
+    configSchema: {
+      type: 'object',
+      properties: {
+        probePaths: {
+          type: 'array',
+          default: ['/', '/login', '/signin', '/account', '/dashboard', '/admin'],
+        },
+      },
+    },
+  }),
+  // ── Active: Injection ──────────────────────────────────────────────────────────────────────────
   new ModuleDef({
     id: 'injection.sqli.basic',
     name: 'Basic SQL Injection Probes',
@@ -260,7 +309,7 @@ export const moduleDefs = [
       },
     },
   }),
-  // ── Passive: TLS & Headers ─────────────────────────────────────────────────
+  // ── Passive: TLS & Headers ──────────────────────────────────────────────────────────────────
   new ModuleDef({
     id: 'tls.headers.basic',
     name: 'TLS & Security Header Check',
