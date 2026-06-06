@@ -1,34 +1,39 @@
 /* =============================================================
-   WebVulnConsole ⚡ app.js  – Full client logic v2
-   All sections rewritten: modal, risk gauge, Shodan tab,
-   aggregated findings, mobile nav, expanded console cmds.
+   WebVulnConsole ⚡ app.js  – Full client logic v3
+   Task 4: Rich Projects UI — modal, per-project stats,
+   finding counts, risk mini-gauge, search/filter, summary bar.
+   All prior functionality (findings, queue, dorks, reports,
+   settings, dashboard, console) preserved exactly.
    ============================================================= */
 'use strict';
 
-// ─── Config ──────────────────────────────────────────────────────────────────
+// ─── Config ────────────────────────────────────────────────────────────────────────
 let CFG = {
   backendUrl: localStorage.getItem('wvc_backend_url') || 'http://127.0.0.1:8787',
   authNote:   localStorage.getItem('wvc_auth_note')   || '',
 };
 
-// ─── State ───────────────────────────────────────────────────────────────────
+// ─── State ────────────────────────────────────────────────────────────────────────
 let state = {
   currentProject: localStorage.getItem('wvc_current_project') || null,
-  projects:  JSON.parse(localStorage.getItem('wvc_projects') || '[]'),
-  targets:   JSON.parse(localStorage.getItem('wvc_targets')  || '{}'),
-  jobs:      [],
-  findings:  [],
-  findingsPage: 0,
+  projects:       JSON.parse(localStorage.getItem('wvc_projects') || '[]'),
+  targets:        JSON.parse(localStorage.getItem('wvc_targets')  || '{}'),
+  jobs:           [],
+  findings:       [],
+  findingsPage:   0,
+  // Per-project stats cache: { [projectId]: { crit, high, medium, low, info, total, lastScan } }
+  projectStats:   JSON.parse(localStorage.getItem('wvc_project_stats') || '{}'),
 };
 const FINDINGS_PER_PAGE = 50;
 
 function saveState() {
-  localStorage.setItem('wvc_projects', JSON.stringify(state.projects));
-  localStorage.setItem('wvc_targets',  JSON.stringify(state.targets));
+  localStorage.setItem('wvc_projects',      JSON.stringify(state.projects));
+  localStorage.setItem('wvc_targets',       JSON.stringify(state.targets));
+  localStorage.setItem('wvc_project_stats', JSON.stringify(state.projectStats));
   if (state.currentProject) localStorage.setItem('wvc_current_project', state.currentProject);
 }
 
-// ─── API helpers ─────────────────────────────────────────────────────────────
+// ─── API helpers ───────────────────────────────────────────────────────────────────
 function apiUrl(path) { return `${CFG.backendUrl}${path}`; }
 async function apiFetch(path, opts = {}) {
   try {
@@ -40,8 +45,8 @@ async function apiFetch(path, opts = {}) {
   }
 }
 
-// ─── Micro utils ─────────────────────────────────────────────────────────────
-function uid()    { return Math.random().toString(36).slice(2,10) + Date.now().toString(36); }
+// ─── Micro utils ───────────────────────────────────────────────────────────────────
+function uid() { return Math.random().toString(36).slice(2,10) + Date.now().toString(36); }
 function escHtml(s) {
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
@@ -63,13 +68,13 @@ function toast(msg, type='info') {
 function timeAgo(iso) {
   if (!iso) return '';
   const s = Math.floor((Date.now() - new Date(iso)) / 1000);
-  if (s < 60) return `${s}s ago`;
-  if (s < 3600) return `${Math.floor(s/60)}m ago`;
+  if (s < 60)    return `${s}s ago`;
+  if (s < 3600)  return `${Math.floor(s/60)}m ago`;
   if (s < 86400) return `${Math.floor(s/3600)}h ago`;
   return new Date(iso).toLocaleDateString();
 }
 
-// ─── Console ─────────────────────────────────────────────────────────────────
+// ─── Console ──────────────────────────────────────────────────────────────────────
 const consoleEl = document.getElementById('console-output');
 function clog(msg, type='') {
   const line = document.createElement('div');
@@ -79,9 +84,9 @@ function clog(msg, type='') {
   consoleEl.scrollTop = consoleEl.scrollHeight;
   if (consoleEl.children.length > 400) consoleEl.removeChild(consoleEl.firstChild);
 }
-clog('WebVulnConsole ⚡ v2 loaded. Type "help" for commands.', 'info');
+clog('WebVulnConsole ⚡ v3 loaded. Type "help" for commands.', 'info');
 
-// ─── Backend health ───────────────────────────────────────────────────────────
+// ─── Backend health ────────────────────────────────────────────────────────────────
 const statusDot   = document.getElementById('status-dot');
 const statusLabel = document.getElementById('status-label');
 async function pingBackend() {
@@ -94,7 +99,7 @@ async function pingBackend() {
 pingBackend();
 setInterval(pingBackend, 30000);
 
-// ─── ToS modal ───────────────────────────────────────────────────────────────
+// ─── ToS modal ────────────────────────────────────────────────────────────────────
 const tosOverlay = document.getElementById('tos-overlay');
 const appEl      = document.getElementById('app');
 const tosCheck   = document.getElementById('tos-check');
@@ -118,7 +123,7 @@ tosEnter.addEventListener('click', () => {
   loadDashboard();
 });
 
-// ─── Navigation ──────────────────────────────────────────────────────────────
+// ─── Navigation ────────────────────────────────────────────────────────────────────
 const navItems  = document.querySelectorAll('.nav-item');
 const pageEls   = document.querySelectorAll('.page');
 const pageTitle = document.getElementById('page-title');
@@ -132,13 +137,14 @@ function showPage(name) {
   pageEls.forEach(el  => el.classList.toggle('active', el.id === `page-${name}`));
   pageTitle.textContent = PAGE_LABELS[name] || name;
   closeSidebar();
-  const loaders = { queue:loadQueue, findings:loadFindings, reports:loadReports,
-                    dashboard:loadDashboard, projects:renderProjectList, targets:renderTargetList };
+  const loaders = {
+    queue:loadQueue, findings:loadFindings, reports:loadReports,
+    dashboard:loadDashboard, projects:renderProjectList, targets:renderTargetList,
+  };
   if (loaders[name]) loaders[name]();
 }
 navItems.forEach(el => el.addEventListener('click', e => { e.preventDefault(); showPage(el.dataset.page); }));
 
-// Mobile sidebar toggle
 const sidebar   = document.getElementById('sidebar');
 const hamburger = document.getElementById('hamburger-btn');
 function closeSidebar() { sidebar.classList.remove('sidebar-open'); }
@@ -147,7 +153,7 @@ document.addEventListener('click', e => {
   if (sidebar.classList.contains('sidebar-open') && !sidebar.contains(e.target) && e.target !== hamburger) closeSidebar();
 });
 
-// ─── Risk score gauge ────────────────────────────────────────────────────────
+// ─── Risk helpers ───────────────────────────────────────────────────────────────────
 function computeRiskScore(findings) {
   if (!findings || !findings.length) return 0;
   const W = { critical:30, high:15, medium:6, low:2, info:0.5 };
@@ -166,25 +172,35 @@ function riskLabel(score) {
   if (score >= 40) return 'HIGH RISK';
   if (score >= 15) return 'MEDIUM RISK';
   if (score >  0)  return 'LOW RISK';
-  return 'NO FINDINGS';
+  return 'CLEAN';
 }
 function buildGauge(score) {
   const color = riskColor(score);
   const label = riskLabel(score);
-  const pct   = score;
   return `
     <div class="risk-gauge">
       <div class="risk-gauge-label" style="color:${color}">${label}</div>
       <div class="risk-gauge-track">
-        <div class="risk-gauge-fill" style="width:${pct}%;background:${color};"></div>
+        <div class="risk-gauge-fill" style="width:${score}%;background:${color};"></div>
       </div>
       <div class="risk-gauge-score" style="color:${color}">${score}<span>/100</span></div>
-    </div>
-  `;
+    </div>`;
+}
+function buildMiniGauge(score) {
+  const color = riskColor(score);
+  return `
+    <div style="margin-top:6px;">
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:${color};font-weight:700;margin-bottom:2px;">
+        <span>${riskLabel(score)}</span><span>${score}/100</span>
+      </div>
+      <div style="height:4px;background:#1e293b;border-radius:2px;overflow:hidden;">
+        <div style="height:100%;width:${score}%;background:${color};border-radius:2px;transition:width .6s;"></div>
+      </div>
+    </div>`;
 }
 
-// ─── Finding detail modal ────────────────────────────────────────────────────
-(function injectModal() {
+// ─── Finding detail modal ─────────────────────────────────────────────────────────
+(function injectFindingModal() {
   const m = document.createElement('div');
   m.id        = 'finding-modal-overlay';
   m.className = 'modal-overlay hidden';
@@ -200,8 +216,7 @@ function buildGauge(score) {
         <div><span class="modal-meta-label">URL</span>
           <a id="modal-url" href="#" target="_blank" rel="noopener" style="color:var(--accent);word-break:break-all;"></a>
         </div>
-        <div><span class="modal-meta-label">HTTP Status</span>
-          <span id="modal-status"></span></div>
+        <div><span class="modal-meta-label">HTTP Status</span><span id="modal-status"></span></div>
         <div id="modal-note-row" style="display:none;"><span class="modal-meta-label">Note</span>
           <span id="modal-note" style="opacity:.8;"></span></div>
         <div id="modal-payload-row" style="display:none;"><span class="modal-meta-label">Payload</span>
@@ -221,8 +236,7 @@ function buildGauge(score) {
         <button class="btn btn-sm btn-ghost"    id="modal-btn-copy">📋 Copy URL</button>
         <button class="btn btn-sm btn-danger"   id="modal-close-btn2">Close</button>
       </div>
-    </div>
-  `;
+    </div>`;
   document.body.appendChild(m);
   document.getElementById('modal-close-btn').addEventListener('click',  closeModal);
   document.getElementById('modal-close-btn2').addEventListener('click', closeModal);
@@ -232,41 +246,32 @@ function buildGauge(score) {
     navigator.clipboard?.writeText(url).then(() => toast('URL copied','ok'));
   });
   document.getElementById('modal-btn-confirm').addEventListener('click', () => {
-    toast('Finding marked as Confirmed','ok');
-    clog('Finding confirmed by operator.','ok');
-    closeModal();
+    toast('Finding marked as Confirmed','ok'); clog('Finding confirmed.','ok'); closeModal();
   });
   document.getElementById('modal-btn-mitigate').addEventListener('click', () => {
-    toast('Finding marked as Mitigated','ok');
-    clog('Finding marked mitigated.','warn');
-    closeModal();
+    toast('Finding marked as Mitigated','ok'); clog('Finding marked mitigated.','warn'); closeModal();
   });
 })();
 
 const REMEDIATION_MAP = {
-  ENV_FILE:       'Remove .env files from web root. Add .env to .gitignore. Use environment variables injected at runtime by your host/CI system — never commit secrets.',
-  GIT_REPO:       'Delete /.git directory from web root or block access via web server rules (deny /\.git). Use a proper deployment pipeline that never exposes the repo directory.',
-  SVN_REPO:       'Remove .svn directories from web root. Block access via server config.',
-  HG_REPO:        'Remove .hg directories from web root and block via server config.',
-  CONFIG_FILE:    'Move config files outside the web root. Restrict file permissions. Never commit config files with credentials.',
-  DB_DUMP:        'Remove SQL dump files immediately. Store database backups off-server in secured storage (S3 with private ACL, encrypted). Rotate all credentials in the dump.',
-  BACKUP:         'Remove backup archives from web root. Store backups off-server. Rotate any credentials they may contain.',
-  RECON:          'Review robots.txt for sensitive path disclosures. Ensure disallowed paths are actually protected by authentication, not just hidden.',
-  DEBUG:          'Disable debug modes in production (APP_DEBUG=false, display_errors=Off). Remove phpinfo.php and test files from production servers.',
-  ADMIN:          'Ensure admin panels require strong authentication. Consider IP allowlisting for admin routes. Use 2FA.',
-  LEAK:           'Remove .DS_Store files (add to .gitignore). They expose directory structure.',
-  POLICY:         'Review crossdomain.xml/clientaccesspolicy.xml. Restrict access origins to only trusted domains.',
-  CLOUD_META:     'Block access to cloud metadata endpoint from application layer. Apply IMDSv2 on AWS. Restrict SSRF vectors.',
-  SQLI:           'Use parameterized queries / prepared statements. Never interpolate user input into SQL strings. Deploy a WAF.',
-  XSS:            'HTML-encode all user-supplied output. Implement a Content-Security-Policy header. Use framework-level auto-escaping.',
-  ERROR_PAGE:     'Set generic error pages. Disable stack traces in production. Configure proper error handling middleware.',
-  DEBUG_LEAK:     'Disable debug mode. Configure proper error handling so stack traces never reach the client.',
-  HEADERS:        'Add the missing security header to your web server or application config. Use securityheaders.com to validate.',
-  CORS:           'Restrict Access-Control-Allow-Origin to your own domain. Never reflect arbitrary origins. Avoid using wildcard * with credentialed requests.',
-  REDIRECT:       'Force HTTPS via HSTS. Ensure your server does not redirect HTTPS traffic to HTTP.',
-  OPEN_REDIRECT:  'Validate redirect destinations against an allowlist. Reject or sanitize user-supplied redirect URLs.',
-  PATH_TRAVERSAL: 'Validate and sanitize all file path inputs. Use chroot jails or allowlisted directory access. Ensure web server does not serve files outside web root.',
-  WORDPRESS:      'Disable XML-RPC if not needed. Restrict REST API user enumeration. Keep WordPress core, themes, and plugins updated. Use a security plugin like Wordfence.',
+  ENV_FILE:'Remove .env files from web root. Add .env to .gitignore. Use environment variables injected at runtime.',
+  GIT_REPO:'Delete /.git directory from web root or block access via web server rules.',
+  CONFIG_FILE:'Move config files outside the web root. Restrict permissions. Never commit files with credentials.',
+  DB_DUMP:'Remove SQL dump files immediately. Store backups off-server (S3 private ACL, encrypted). Rotate credentials.',
+  BACKUP:'Remove backup archives from web root. Store backups off-server. Rotate any credentials they may contain.',
+  RECON:'Review robots.txt for sensitive path disclosures. Ensure disallowed paths are auth-protected.',
+  DEBUG:'Disable debug modes in production (APP_DEBUG=false). Remove phpinfo.php from production.',
+  ADMIN:'Ensure admin panels require strong authentication. Consider IP allowlisting. Use 2FA.',
+  LEAK:'Remove .DS_Store files (add to .gitignore). They expose directory structure.',
+  SQLI:'Use parameterized queries / prepared statements. Never interpolate user input into SQL. Deploy a WAF.',
+  XSS:'HTML-encode all user-supplied output. Implement CSP. Use framework-level auto-escaping.',
+  ERROR_PAGE:'Set generic error pages. Disable stack traces in production.',
+  HEADERS:'Add the missing security header to your web server or application config. Validate with securityheaders.com.',
+  TLS:'Add HSTS. Enforce HTTPS. Add missing security response headers. Remove version banners.',
+  EXPOSURE:'Remove or restrict access to this file/endpoint. Ensure it requires authentication.',
+  PATH_TRAVERSAL:'Validate and sanitize all file path inputs. Use chroot jails. Never serve files outside web root.',
+  MISCONFIG:'Disable directory listing. Remove default server pages and test files.',
+  VCS:'Delete .git/.svn directories from web root. Block access via server config.',
 };
 
 function openFindingModal(f) {
@@ -274,23 +279,21 @@ function openFindingModal(f) {
   document.getElementById('modal-cat').textContent     = f.category || '';
   document.getElementById('modal-title').textContent   = f.title    || 'Finding Detail';
   const urlEl = document.getElementById('modal-url');
-  urlEl.textContent = f.url || '';
-  urlEl.href        = f.url || '#';
+  urlEl.textContent = f.url || ''; urlEl.href = f.url || '#';
   document.getElementById('modal-status').textContent = f.statusCode ? String(f.statusCode) : 'N/A';
   const noteRow = document.getElementById('modal-note-row');
-  const note    = f.note || '';
-  noteRow.style.display = note ? 'block' : 'none';
-  document.getElementById('modal-note').textContent = note;
+  noteRow.style.display = (f.note||'') ? 'block' : 'none';
+  document.getElementById('modal-note').textContent = f.note||'';
   const payRow = document.getElementById('modal-payload-row');
   payRow.style.display = f.payload ? 'block' : 'none';
-  document.getElementById('modal-payload').textContent = f.payload || '';
+  document.getElementById('modal-payload').textContent = f.payload||'';
   const snipWrap = document.getElementById('modal-snippet-wrap');
-  const snip     = (f.bodySnippet || '').trim();
+  const snip = (f.bodySnippet||'').trim();
   snipWrap.style.display = snip ? 'block' : 'none';
-  document.getElementById('modal-snippet').textContent = snip.slice(0, 800);
-  const remKey = (f.category || '').toUpperCase().replace(/[^A-Z_]/g,'');
+  document.getElementById('modal-snippet').textContent = snip.slice(0,800);
+  const remKey = (f.category||'').toUpperCase().replace(/[^A-Z_]/g,'');
   document.getElementById('modal-remediation').textContent =
-    REMEDIATION_MAP[remKey] || 'Review the finding manually and apply the principle of least privilege. Restrict access and remove exposure.';
+    REMEDIATION_MAP[remKey] || 'Review the finding manually and apply the principle of least privilege.';
   document.getElementById('finding-modal-overlay').classList.remove('hidden');
   document.body.style.overflow = 'hidden';
 }
@@ -300,8 +303,234 @@ function closeModal() {
 }
 window.openFindingModal = openFindingModal;
 
-// ─── Projects ─────────────────────────────────────────────────────────────────
+// =============================================================================
+// PROJECTS — Task 4: Full rewrite
+// =============================================================================
+
+// ─── New Project Modal ──────────────────────────────────────────────────────────────
+const pmOverlay = document.getElementById('project-modal-overlay');
+const pmName    = document.getElementById('pm-name');
+const pmClient  = document.getElementById('pm-client');
+const pmScope   = document.getElementById('pm-scope');
+const pmPolicy  = document.getElementById('pm-policy');
+const pmNameErr = document.getElementById('pm-name-err');
+
+function openProjectModal() {
+  pmName.value = ''; pmClient.value = ''; pmScope.value = '';
+  pmPolicy.value = 'policy_normal';
+  pmNameErr.style.display = 'none';
+  pmOverlay.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  setTimeout(() => pmName.focus(), 80);
+}
+function closeProjectModal() {
+  pmOverlay.classList.add('hidden');
+  document.body.style.overflow = '';
+}
+
+document.getElementById('project-modal-close').addEventListener('click',  closeProjectModal);
+document.getElementById('project-modal-cancel').addEventListener('click', closeProjectModal);
+pmOverlay.addEventListener('click', e => { if (e.target === pmOverlay) closeProjectModal(); });
+
+document.getElementById('project-modal-save').addEventListener('click', () => {
+  const name = pmName.value.trim();
+  if (!name) { pmNameErr.style.display = 'block'; pmName.focus(); return; }
+  pmNameErr.style.display = 'none';
+  const id     = uid();
+  const client = pmClient.value.trim();
+  const scope  = pmScope.value.trim();
+  const policy = pmPolicy.value;
+  state.projects.push({ id, name, client, scope, policy, createdAt: new Date().toISOString() });
+  saveState();
+  selectProject(id);
+  renderProjectSelect();
+  renderProjectList();
+  closeProjectModal();
+  clog(`Project created: "${name}" [${id}]`, 'ok');
+  toast(`Project "${name}" created`, 'ok');
+});
+
+// Enter key submits modal
+pmName.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('project-modal-save').click(); });
+
+// ─── Wire create buttons to modal ───────────────────────────────────────────────────────
 const projectSelect = document.getElementById('project-select');
+document.getElementById('btn-new-project').addEventListener('click',    openProjectModal);
+document.getElementById('btn-create-project').addEventListener('click', openProjectModal);
+
+// ─── Per-project stats loader ─────────────────────────────────────────────────────────
+/**
+ * Fetch all completed scan jobs for a project and aggregate findings.
+ * Caches result in state.projectStats[id].
+ */
+async function loadProjectStats(projectId) {
+  const r = await apiFetch(`/api/scans?projectId=${encodeURIComponent(projectId)}`);
+  if (!r.ok) return null;
+  const done = (r.data.jobs||[]).filter(j => j.status === 'completed');
+  if (!done.length) {
+    state.projectStats[projectId] = { crit:0, high:0, medium:0, low:0, info:0, total:0, lastScan: null, score:0 };
+    saveState();
+    return state.projectStats[projectId];
+  }
+  // Aggregate all findings
+  const allF = [];
+  await Promise.all(done.slice(0,5).map(async job => {
+    const rr = await apiFetch(`/api/scans/${job.id}/results`);
+    if (rr.ok) allF.push(...(rr.data.findings||[]));
+  }));
+  // Dedup
+  const seen = new Set();
+  const deduped = allF.filter(f => {
+    const k = `${f.url}|${f.category}|${f.severity}`;
+    if (seen.has(k)) return false; seen.add(k); return true;
+  });
+  const lastJob = done.sort((a,b) => new Date(b.completedAt||b.createdAt) - new Date(a.completedAt||a.createdAt))[0];
+  const stats = {
+    crit:   deduped.filter(f=>f.severity==='critical').length,
+    high:   deduped.filter(f=>f.severity==='high').length,
+    medium: deduped.filter(f=>f.severity==='medium').length,
+    low:    deduped.filter(f=>f.severity==='low').length,
+    info:   deduped.filter(f=>f.severity==='info').length,
+    total:  deduped.length,
+    lastScan: lastJob.completedAt || lastJob.createdAt || null,
+    score:    computeRiskScore(deduped),
+  };
+  state.projectStats[projectId] = stats;
+  saveState();
+  return stats;
+}
+
+// ─── Render project list (rich cards) ────────────────────────────────────────────────────
+function projectCardHTML(p) {
+  const targets = (state.targets[p.id]||[]).length;
+  const isActive = p.id === state.currentProject;
+  const stats = state.projectStats[p.id];
+
+  // Finding severity pills
+  let statsHTML = '';
+  if (stats && stats.total > 0) {
+    const pills = [
+      stats.crit   ? `<span style="background:#ef444422;color:#ef4444;border:1px solid #ef444444;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:700;">${stats.crit} crit</span>` : '',
+      stats.high   ? `<span style="background:#f9731622;color:#f97316;border:1px solid #f9731644;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:700;">${stats.high} high</span>` : '',
+      stats.medium ? `<span style="background:#eab30822;color:#eab308;border:1px solid #eab30844;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:700;">${stats.medium} med</span>` : '',
+      stats.low    ? `<span style="background:#3b82f622;color:#3b82f6;border:1px solid #3b82f644;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:700;">${stats.low} low</span>` : '',
+      stats.info   ? `<span style="background:#6b728022;color:#9ca3af;border:1px solid #6b728044;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:700;">${stats.info} info</span>` : '',
+    ].filter(Boolean).join(' ');
+    statsHTML = `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;align-items:center;">${pills}</div>`;
+    statsHTML += buildMiniGauge(stats.score);
+  } else if (stats) {
+    statsHTML = `<div style="font-size:11px;color:#6b7280;margin-top:6px;">✓ No findings</div>`;
+  } else {
+    statsHTML = `<div style="font-size:11px;color:#475569;margin-top:6px;">Stats not loaded — <a href="#" style="color:var(--accent);" onclick="event.preventDefault();refreshProjectStats('${escHtml(p.id)}')">load now</a></div>`;
+  }
+
+  const policyBadge = p.policy
+    ? `<span style="font-size:10px;color:#64748b;background:#1e293b;padding:1px 6px;border-radius:4px;">${escHtml(p.policy.replace('policy_',''))}</span>`
+    : '';
+
+  return `
+  <div class="job-card project-card" id="proj-card-${escHtml(p.id)}"
+    style="${isActive ? 'border-color:#38bdf8;' : ''}">
+
+    <!-- Left: info -->
+    <div style="flex:1;min-width:0;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <div class="job-desc" style="font-size:14px;">${escHtml(p.name)}</div>
+        ${isActive ? '<span class="badge badge-info" style="font-size:10px;">active</span>' : ''}
+        ${policyBadge}
+      </div>
+      <div class="job-id" style="margin-top:3px;">
+        ${p.client ? `<span>🏛 ${escHtml(p.client)}</span> &nbsp;|&nbsp;` : ''}
+        <span>🎯 ${targets} target${targets!==1?'s':''}</span>
+        ${stats?.lastScan ? ` &nbsp;|&nbsp; <span>🕒 ${timeAgo(stats.lastScan)}</span>` : ''}
+        ${p.scope ? ` &nbsp;|&nbsp; <span title="${escHtml(p.scope)}">📋 scope set</span>` : ''}
+      </div>
+      ${statsHTML}
+    </div>
+
+    <!-- Right: actions -->
+    <div style="display:flex;flex-direction:column;gap:5px;align-items:flex-end;flex-shrink:0;">
+      ${!isActive
+        ? `<button class="btn btn-sm btn-primary" onclick="window._selectProject('${escHtml(p.id)}')">Select</button>`
+        : `<button class="btn btn-sm btn-primary" onclick="showPage('targets')">▶ Launch Scan</button>`
+      }
+      <div style="display:flex;gap:4px;">
+        <button class="btn btn-sm btn-ghost" title="Rename" onclick="window._renameProject('${escHtml(p.id)}')">Rename</button>
+        <button class="btn btn-sm btn-ghost" title="Refresh stats" onclick="refreshProjectStats('${escHtml(p.id)}')">Stats</button>
+        <button class="btn btn-sm btn-ghost" title="Export JSON" onclick="window._exportProject('${escHtml(p.id)}')">Export</button>
+        <button class="btn btn-sm btn-danger" title="Delete project" onclick="window._deleteProject('${escHtml(p.id)}')">Del</button>
+      </div>
+    </div>
+
+  </div>`;
+}
+
+async function renderProjectList() {
+  const el    = document.getElementById('project-list');
+  const badge = document.getElementById('projects-count-badge');
+  const bar   = document.getElementById('projects-summary-bar');
+
+  if (!state.projects.length) {
+    el.innerHTML = `
+      <div style="text-align:center;padding:40px 20px;">
+        <div style="font-size:32px;margin-bottom:10px;">📁</div>
+        <div style="color:#64748b;font-size:13px;margin-bottom:14px;">No projects yet. Create your first one to get started.</div>
+        <button class="btn btn-primary" onclick="openProjectModal()">+ Create First Project</button>
+      </div>`;
+    if (badge) badge.textContent = '';
+    bar.style.display = 'none';
+    return;
+  }
+
+  if (badge) badge.textContent = `(${state.projects.length})`;
+
+  const filterVal = (document.getElementById('project-search')?.value||'').toLowerCase();
+  const visible = filterVal
+    ? state.projects.filter(p =>
+        p.name.toLowerCase().includes(filterVal) ||
+        (p.client||'').toLowerCase().includes(filterVal))
+    : state.projects;
+
+  el.innerHTML = visible.length
+    ? visible.map(projectCardHTML).join('')
+    : '<p style="opacity:.5;font-size:12px;padding:20px 0;">No projects match that filter.</p>';
+
+  // Summary bar: aggregate across all projects
+  const allStats = Object.values(state.projectStats);
+  if (allStats.length) {
+    const totalF  = allStats.reduce((a,s)=>a+s.total,0);
+    const totalC  = allStats.reduce((a,s)=>a+s.crit,0);
+    const totalH  = allStats.reduce((a,s)=>a+s.high,0);
+    const avgRisk = allStats.length ? Math.round(allStats.reduce((a,s)=>a+s.score,0)/allStats.length) : 0;
+    bar.style.display = 'flex';
+    bar.innerHTML = `
+      <span style="color:#94a3b8;">All Projects:</span>
+      <span>🔴 <strong style="color:#ef4444;">${totalC}</strong> critical</span>
+      <span>🟠 <strong style="color:#f97316;">${totalH}</strong> high</span>
+      <span>📊 <strong style="color:#94a3b8;">${totalF}</strong> total findings</span>
+      <span>Avg risk: <strong style="color:${riskColor(avgRisk)};">${avgRisk}/100</strong></span>`;
+  } else {
+    bar.style.display = 'none';
+  }
+}
+
+// Filter project list as user types
+window.filterProjectList = function(val) {
+  renderProjectList();
+};
+
+// Refresh stats for a single project card (live reload)
+window.refreshProjectStats = async function(id) {
+  const card = document.getElementById(`proj-card-${id}`);
+  if (card) {
+    const btn = card.querySelector('[onclick*="refreshProjectStats"]');
+    if (btn) { btn.textContent = '...'; btn.disabled = true; }
+  }
+  await loadProjectStats(id);
+  renderProjectList();
+  toast('Stats refreshed', 'ok');
+};
+
 function renderProjectSelect() {
   const cur = state.currentProject;
   projectSelect.innerHTML =
@@ -310,39 +539,7 @@ function renderProjectSelect() {
       `<option value="${escHtml(p.id)}" ${p.id===cur?'selected':''}>${escHtml(p.name)}</option>`
     ).join('');
 }
-function renderProjectList() {
-  const el = document.getElementById('project-list');
-  if (!state.projects.length) {
-    el.innerHTML = '<p style="opacity:.5;font-size:12px;">No projects yet. Create one to get started.</p>';
-    return;
-  }
-  el.innerHTML = state.projects.map(p => {
-    const score = computeRiskScore(
-      state.findings.filter ? state.findings : []
-    );
-    return `
-    <div class="job-card">
-      <div>
-        <div class="job-desc">${escHtml(p.name)}</div>
-        <div class="job-id">
-          ID: ${escHtml(p.id)} &nbsp;|
-          Client: ${escHtml(p.client||'—')} &nbsp;|
-          Targets: ${(state.targets[p.id]||[]).length} &nbsp;|
-          ${p.createdAt ? timeAgo(p.createdAt) : ''}
-        </div>
-      </div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;">
-        ${p.id===state.currentProject
-          ? '<span class="badge badge-info">active</span>'
-          : `<button class="btn btn-sm btn-primary" onclick="window._selectProject('${escHtml(p.id)}')">Select</button>`
-        }
-        <button class="btn btn-sm btn-ghost"  onclick="window._renameProject('${escHtml(p.id)}')">Rename</button>
-        <button class="btn btn-sm btn-danger" onclick="window._deleteProject('${escHtml(p.id)}')">Delete</button>
-        <button class="btn btn-sm btn-ghost"  onclick="window._exportProject('${escHtml(p.id)}')">Export</button>
-      </div>
-    </div>`;
-  }).join('');
-}
+
 function selectProject(id) {
   state.currentProject = id;
   saveState();
@@ -353,47 +550,65 @@ function selectProject(id) {
   loadDashboard();
 }
 window._selectProject = selectProject;
+
 window._renameProject = function(id) {
   const p = state.projects.find(x=>x.id===id);
   if (!p) return;
   const name = prompt('New name:', p.name);
   if (!name?.trim()) return;
   p.name = name.trim(); saveState(); renderProjectSelect(); renderProjectList();
-  clog(`Renamed to: ${name.trim()}`,'ok');
+  clog(`Renamed to: ${name.trim()}`, 'ok');
 };
+
 window._deleteProject = function(id) {
-  if (!confirm('Delete this project and all its targets?')) return;
-  state.projects = state.projects.filter(p=>p.id!==id);
+  const p = state.projects.find(x=>x.id===id);
+  if (!confirm(`Delete project "${p?.name||id}" and all its data?`)) return;
+  state.projects = state.projects.filter(x=>x.id!==id);
   delete state.targets[id];
-  if (state.currentProject===id) { state.currentProject=state.projects[0]?.id||null; localStorage.removeItem('wvc_current_project'); }
+  delete state.projectStats[id];
+  if (state.currentProject===id) {
+    state.currentProject = state.projects[0]?.id || null;
+    localStorage.removeItem('wvc_current_project');
+  }
   saveState(); renderProjectSelect(); renderProjectList();
-  clog(`Project deleted: ${id}`,'warn');
+  clog(`Project deleted: ${id}`, 'warn');
 };
+
 window._exportProject = function(id) {
   const p = state.projects.find(x=>x.id===id);
   if (!p) return;
-  const blob = new Blob([JSON.stringify({project:p,targets:state.targets[id]||[],findings:state.findings},null,2)],{type:'application/json'});
-  const url  = URL.createObjectURL(blob);
-  Object.assign(document.createElement('a'),{href:url,download:`${p.name.replace(/\s+/g,'_')}_export.json`}).click();
+  const blob = new Blob([JSON.stringify({
+    project: p,
+    targets: state.targets[id]||[],
+    findings: state.findings,
+    stats: state.projectStats[id]||null,
+  }, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  Object.assign(document.createElement('a'),{
+    href:url, download:`${p.name.replace(/\s+/g,'_')}_export.json`
+  }).click();
   URL.revokeObjectURL(url);
-  clog(`Exported: ${p.name}`,'ok');
+  clog(`Exported: ${p.name}`, 'ok');
 };
-projectSelect.addEventListener('change', e => { if (e.target.value) selectProject(e.target.value); });
-function createProjectPrompt() {
-  const name = prompt('Project name:');
-  if (!name?.trim()) return;
-  const id     = uid();
-  const client = prompt('Client name / ticket ID (optional):') || '';
-  state.projects.push({id,name:name.trim(),client,createdAt:new Date().toISOString()});
-  saveState(); selectProject(id); renderProjectSelect(); renderProjectList();
-  clog(`> create project "${name.trim()}" [${id}]`,'cmd');
-  toast(`Project "${name.trim()}" created`,'ok');
-}
-document.getElementById('btn-new-project').addEventListener('click',    createProjectPrompt);
-document.getElementById('btn-create-project').addEventListener('click', createProjectPrompt);
-renderProjectSelect(); renderProjectList();
 
-// ─── Targets ──────────────────────────────────────────────────────────────────
+projectSelect.addEventListener('change', e => { if (e.target.value) selectProject(e.target.value); });
+
+// Initial render
+renderProjectSelect();
+renderProjectList();
+
+// Auto-load stats for all projects in background after page loads
+window.addEventListener('load', () => {
+  state.projects.forEach(p => {
+    if (!state.projectStats[p.id]) {
+      loadProjectStats(p.id).then(() => renderProjectList());
+    }
+  });
+});
+
+// =============================================================================
+// TARGETS
+// =============================================================================
 function getTargets() { return state.currentProject ? (state.targets[state.currentProject]||[]) : []; }
 function renderTargetList() {
   const el      = document.getElementById('target-list');
@@ -448,7 +663,7 @@ document.getElementById('btn-add-targets').addEventListener('click', () => {
 document.getElementById('btn-run-scan').addEventListener('click', async () => {
   if (!state.currentProject) { clog('Select a project first.','warn'); return; }
   const targets = getTargets();
-  if (!targets.length)       { clog('No targets to scan.','warn'); return; }
+  if (!targets.length) { clog('No targets to scan.','warn'); return; }
   clog(`> queue scan --project "${state.currentProject}" --targets ${targets.length}`,'cmd');
   const r = await apiFetch('/api/scans',{ method:'POST', body:JSON.stringify({projectId:state.currentProject,targets}) });
   if (r.ok) {
@@ -459,7 +674,9 @@ document.getElementById('btn-run-scan').addEventListener('click', async () => {
 });
 renderTargetList();
 
-// ─── Scan Queue ────────────────────────────────────────────────────────────────
+// =============================================================================
+// SCAN QUEUE
+// =============================================================================
 window.loadQueue = async function() {
   const qs = state.currentProject ? `?projectId=${encodeURIComponent(state.currentProject)}` : '';
   const r  = await apiFetch(`/api/scans${qs}`);
@@ -501,7 +718,9 @@ window._cancelJob = async function(jobId) {
   window.loadQueue();
 };
 
-// ─── Findings ─────────────────────────────────────────────────────────────────
+// =============================================================================
+// FINDINGS
+// =============================================================================
 window.loadFindings = async function() {
   const wrap = document.getElementById('findings-table-wrap');
   if (!state.currentProject) {
@@ -513,13 +732,11 @@ window.loadFindings = async function() {
   if (!done.length) {
     wrap.innerHTML='<p style="opacity:.5;font-size:12px;">No completed scans yet.</p>'; return;
   }
-  // Aggregate ALL completed jobs for this project (not just 1)
   const allF = [];
   await Promise.all(done.map(async job => {
     const rr = await apiFetch(`/api/scans/${job.id}/results`);
     if (rr.ok) allF.push(...(rr.data.findings||[]));
   }));
-  // Deduplicate by URL+category
   const seen = new Set();
   state.findings = allF.filter(f => {
     const k = `${f.url}|${f.category}|${f.severity}`;
@@ -535,16 +752,13 @@ function renderFindingsTable(findings) {
   let rows = findings;
   if (sevFilter) rows = rows.filter(f=>f.severity===sevFilter);
   if (catFilter) rows = rows.filter(f=>f.category===catFilter);
-
-  const wrap   = document.getElementById('findings-table-wrap');
-  const page   = state.findingsPage;
-  const total  = rows.length;
-  const paged  = rows.slice(page*FINDINGS_PER_PAGE, (page+1)*FINDINGS_PER_PAGE);
-
+  const wrap  = document.getElementById('findings-table-wrap');
+  const page  = state.findingsPage;
+  const total = rows.length;
+  const paged = rows.slice(page*FINDINGS_PER_PAGE, (page+1)*FINDINGS_PER_PAGE);
   if (!rows.length) {
     wrap.innerHTML='<p style="opacity:.5;font-size:12px;">No findings match the current filters.</p>'; return;
   }
-
   const totalPages = Math.ceil(total/FINDINGS_PER_PAGE);
   const paginationBar = totalPages > 1 ? `
     <div class="pagination-bar">
@@ -552,7 +766,6 @@ function renderFindingsTable(findings) {
       <span style="font-size:11px;opacity:.6;">Page ${page+1} / ${totalPages} &nbsp;(${total} total)</span>
       <button class="btn btn-sm btn-ghost" onclick="changeFindingsPage(1)" ${page>=totalPages-1?'disabled':''}>Next →</button>
     </div>` : `<div style="font-size:11px;opacity:.5;margin-bottom:6px;">${total} finding(s)</div>`;
-
   wrap.innerHTML = `
     ${buildGauge(computeRiskScore(rows))}
     ${paginationBar}
@@ -574,9 +787,8 @@ function renderFindingsTable(findings) {
       </tbody>
     </table>
     ${paginationBar}`;
-  window.__findings = rows; // Store filtered rows for modal access
+  window.__findings = rows;
 }
-
 window.changeFindingsPage = function(dir) {
   const sevFilter = document.getElementById('filter-sev').value;
   const catFilter = document.getElementById('filter-cat').value;
@@ -587,7 +799,6 @@ window.changeFindingsPage = function(dir) {
   state.findingsPage = Math.min(Math.max(state.findingsPage+dir,0),totalPages-1);
   renderFindingsTable(state.findings);
 };
-
 function populateCategoryFilter() {
   const cats = [...new Set(state.findings.map(f=>f.category).filter(Boolean))];
   const el   = document.getElementById('filter-cat');
@@ -596,7 +807,9 @@ function populateCategoryFilter() {
 document.getElementById('filter-sev').addEventListener('change', ()=>{ state.findingsPage=0; renderFindingsTable(state.findings); });
 document.getElementById('filter-cat').addEventListener('change', ()=>{ state.findingsPage=0; renderFindingsTable(state.findings); });
 
-// ─── Dorks ────────────────────────────────────────────────────────────────────
+// =============================================================================
+// DORKS
+// =============================================================================
 document.getElementById('btn-gen-dorks').addEventListener('click', async () => {
   const domain = document.getElementById('dork-domain-input').value.trim();
   if (!domain) { clog('Enter a domain.','warn'); return; }
@@ -629,13 +842,13 @@ document.getElementById('btn-gen-dorks').addEventListener('click', async () => {
 window.switchDorkTab = function(btn, panelId) {
   btn.closest('.dork-tabs').querySelectorAll('.dork-tab').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
-  btn.closest('.dork-results-inner,.page')?.querySelectorAll('.dork-tab-panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById(panelId)?.classList.add('active');
   const parent = document.getElementById(panelId)?.parentElement;
   if (parent) parent.querySelectorAll('.dork-tab-panel').forEach(p=>p.classList.toggle('active',p.id===panelId));
 };
 
-// ─── Reports ──────────────────────────────────────────────────────────────────
+// =============================================================================
+// REPORTS
+// =============================================================================
 window.loadReports = async function() {
   const qs = state.currentProject ? `?projectId=${encodeURIComponent(state.currentProject)}` : '';
   const r  = await apiFetch(`/api/scans${qs}`);
@@ -665,21 +878,25 @@ window._copyReportUrl = function(jobId) {
   navigator.clipboard?.writeText(url).then(()=>toast('Report URL copied','ok'));
 };
 
-// ─── Settings ─────────────────────────────────────────────────────────────────
+// =============================================================================
+// SETTINGS
+// =============================================================================
 document.getElementById('setting-backend-url').value = CFG.backendUrl;
 document.getElementById('setting-auth-note').value   = CFG.authNote;
 document.getElementById('btn-save-settings').addEventListener('click', () => {
   const url  = document.getElementById('setting-backend-url').value.trim();
   const note = document.getElementById('setting-auth-note').value.trim();
-  if (url)  { CFG.backendUrl=url;  localStorage.setItem('wvc_backend_url',url);  }
-  if (note) { CFG.authNote=note;  localStorage.setItem('wvc_auth_note',note);   }
+  if (url)  { CFG.backendUrl=url; localStorage.setItem('wvc_backend_url',url); }
+  if (note) { CFG.authNote=note; localStorage.setItem('wvc_auth_note',note); }
   document.getElementById('settings-saved').style.display='block';
   setTimeout(()=>document.getElementById('settings-saved').style.display='none',2500);
   clog('Settings saved. Pinging backend...','info');
   pingBackend();
 });
 
-// ─── Dashboard ────────────────────────────────────────────────────────────────
+// =============================================================================
+// DASHBOARD
+// =============================================================================
 async function loadDashboard() {
   const statRow = document.getElementById('stat-row');
   const recEl   = document.getElementById('recent-findings');
@@ -688,11 +905,9 @@ async function loadDashboard() {
   let jobs=[], allFindings=[];
   if (r.ok) {
     jobs = r.data.jobs||[];
-    // Aggregate findings from ALL completed jobs
     const done = jobs.filter(j=>j.status==='completed');
     const results = await Promise.all(done.slice(0,10).map(j=>apiFetch(`/api/scans/${j.id}/results`)));
     results.forEach(rr=>{ if(rr.ok) allFindings.push(...(rr.data.findings||[])); });
-    // Deduplicate
     const seen=new Set();
     allFindings = allFindings.filter(f=>{ const k=`${f.url}|${f.category}`; if(seen.has(k))return false; seen.add(k); return true; });
   }
@@ -704,22 +919,21 @@ async function loadDashboard() {
   const jobsRun  = jobs.filter(j=>j.status==='running').length;
 
   statRow.innerHTML = [
-    {num:state.projects.length, lbl:'Projects',     color:''},
-    {num:targetCount,           lbl:'Targets',       color:''},
-    {num:jobs.length,           lbl:'Total Jobs',    color:''},
-    {num:jobsDone,              lbl:'Completed',     color:'var(--green)'},
-    {num:jobsRun,               lbl:'Running',       color:'var(--accent)'},
-    {num:crit,                  lbl:'Critical',      color:'var(--red)'},
-    {num:high,                  lbl:'High',          color:'var(--orange)'},
-    {num:medium,                lbl:'Medium',        color:'var(--yellow)'},
-    {num:allFindings.length,    lbl:'Total Findings',color:''},
+    {num:state.projects.length, lbl:'Projects',      color:''},
+    {num:targetCount,           lbl:'Targets',        color:''},
+    {num:jobs.length,           lbl:'Total Jobs',     color:''},
+    {num:jobsDone,              lbl:'Completed',      color:'var(--green)'},
+    {num:jobsRun,               lbl:'Running',        color:'var(--accent)'},
+    {num:crit,                  lbl:'Critical',       color:'var(--red)'},
+    {num:high,                  lbl:'High',           color:'var(--orange)'},
+    {num:medium,                lbl:'Medium',         color:'var(--yellow)'},
+    {num:allFindings.length,    lbl:'Total Findings', color:''},
   ].map(s=>`
     <div class="stat-box">
       <div class="num" style="color:${s.color||'var(--accent)'}">${s.num}</div>
       <div class="lbl">${s.lbl}</div>
     </div>`).join('');
 
-  // Risk gauge on dashboard
   const gaugeEl = document.getElementById('dashboard-risk-gauge');
   if (gaugeEl) gaugeEl.innerHTML = buildGauge(score);
 
@@ -746,7 +960,9 @@ async function loadDashboard() {
   window.__dashFindings = topFindings;
 }
 
-// ─── Console commands ─────────────────────────────────────────────────────────
+// =============================================================================
+// CONSOLE COMMANDS
+// =============================================================================
 const consoleInput = document.getElementById('console-input');
 const CMD_HISTORY  = []; let histIdx = -1;
 consoleInput.addEventListener('keydown', async e => {
@@ -832,7 +1048,9 @@ consoleInput.addEventListener('keydown', async e => {
   else clog(`Unknown command: "${cmd}". Type help.`,'warn');
 });
 
-// ─── Dynamic styles ───────────────────────────────────────────────────────────
+// =============================================================================
+// DYNAMIC STYLES
+// =============================================================================
 const dynStyle = document.createElement('style');
 dynStyle.textContent = `
 /* Toast */
@@ -844,15 +1062,15 @@ dynStyle.textContent = `
 .toast-ok{border-color:#22c55e60;color:#22c55e;}
 .toast-warn{border-color:#eab30860;color:#eab308;}
 .toast-crit{border-color:#ef444460;color:#ef4444;}
-/* Modal */
+/* Modals */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:8000;
   display:flex;align-items:center;justify-content:center;padding:16px;}
 .modal-overlay.hidden{display:none;}
 .modal-box{background:#0f172a;border:1px solid #1e293b;border-radius:10px;
   width:100%;max-width:680px;max-height:90vh;overflow-y:auto;
-  display:flex;flex-direction:column;gap:0;}
-.modal-header{display:flex;align-items:center;padding:14px 16px 0;
-  border-bottom:1px solid #1e293b;padding-bottom:12px;}
+  display:flex;flex-direction:column;}
+.modal-header{display:flex;align-items:center;padding:14px 16px 12px;
+  border-bottom:1px solid #1e293b;}
 .modal-close{margin-left:auto;background:none;border:none;color:#6b7280;
   font-size:16px;cursor:pointer;line-height:1;padding:2px 6px;}
 .modal-close:hover{color:#e5e7eb;}
@@ -864,8 +1082,10 @@ dynStyle.textContent = `
   padding:10px;font-size:11px;color:#94a3b8;overflow-x:auto;max-height:180px;
   overflow-y:auto;white-space:pre-wrap;word-break:break-all;margin:0 16px 10px;}
 .modal-footer{padding:0 16px 10px;border-top:1px solid #1e293b;padding-top:12px;}
-.modal-actions{padding:10px 16px 14px;display:flex;gap:8px;flex-wrap:wrap;
-  border-top:1px solid #1e293b;}
+.modal-actions{padding:10px 16px 14px;display:flex;gap:8px;flex-wrap:wrap;border-top:1px solid #1e293b;}
+/* Project cards */
+.project-card{transition:border-color .2s;}
+.project-card:hover{border-color:#334155!important;}
 /* Risk gauge */
 .risk-gauge{margin:10px 0 14px;}
 .risk-gauge-label{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px;}
@@ -887,15 +1107,16 @@ dynStyle.textContent = `
 /* Mobile sidebar */
 @media(max-width:640px){
   .sidebar{position:fixed;left:-240px;top:0;height:100vh;z-index:500;
-    transition:left .25s ease;box-shadow:none;}
+    transition:left .25s ease;}
   .sidebar.sidebar-open{left:0;box-shadow:4px 0 24px #000a;}
   .main{margin-left:0!important;}
   #hamburger-btn{display:flex!important;}
 }
-/* Yellow for medium */
 :root{--yellow:#eab308;}
 `;
 document.head.appendChild(dynStyle);
 
-// ─── Init ─────────────────────────────────────────────────────────────────────
+// =============================================================================
+// INIT
+// =============================================================================
 if (sessionStorage.getItem('wvc_tos')==='yes') loadDashboard();
