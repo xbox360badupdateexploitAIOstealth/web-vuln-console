@@ -1,7 +1,7 @@
 // src/core/engine.js
 // Scan engine: passive exposure + TLS/headers + cookie/session + HTML crawl +
-// JS secret scan + source map detect + active injection.
-// v1.4.0 — Phase 2.5 sourceMapDetect wired (TODO-03).
+// JS secret scan + source map detect + cPanel/WHM scan + active injection.
+// v1.5.0 — Phase 1d cPanelWhm wired (TODO-04).
 
 import { ScanJob, Finding, Evidence } from './models.js';
 import { moduleDefById }               from './moduleRegistry.js';
@@ -14,6 +14,7 @@ import { runTlsHeaderChecks }          from './checks/tlsHeaders.js';
 import { runCookieSessionChecks }      from './checks/cookieSession.js';
 import { runJsSecretScan }             from './checks/jsSecretScan.js';
 import { runSourceMapDetect }          from './checks/sourceMapDetect.js';
+import { runCPanelWhmScan }            from './checks/cPanelWhm.js';
 
 export class EngineConfig {
   constructor({ fetchAdapter, baseUrlResolver }) {
@@ -99,6 +100,15 @@ async function scanTarget({ ctx, target, enabledModules, engineConfig }) {
       ctx,
       target,
       baseUrl,
+      fetchAdapter: engineConfig.fetchAdapter,
+    });
+  }
+
+  // ── Phase 1d: cPanel / WHM IP scan ─────────────────────────────────────────────
+  if (moduleEnabled(enabledModules, 'exposure.cve.cpanel_whm')) {
+    await runCPanelWhmScan({
+      ctx,
+      target,
       fetchAdapter: engineConfig.fetchAdapter,
     });
   }

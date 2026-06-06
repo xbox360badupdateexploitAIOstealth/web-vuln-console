@@ -201,8 +201,8 @@ export const moduleDefs = [
     configSchema: {
       type: 'object',
       properties: {
-        maxJsFiles: { type: 'number', default: 30      },
-        maxMapBytes: { type: 'number', default: 262144 },
+        maxJsFiles:  { type: 'number', default: 30      },
+        maxMapBytes: { type: 'number', default: 262144  },
       },
     },
   }),
@@ -229,6 +229,35 @@ export const moduleDefs = [
           type: 'array',
           default: ['/', '/login', '/signin', '/account', '/dashboard', '/admin'],
         },
+      },
+    },
+  }),
+  // ── CVE: cPanel/WHM Exposure ──────────────────────────────────────────────────────────────
+  new ModuleDef({
+    id: 'exposure.cve.cpanel_whm',
+    name: 'cPanel & WHM Panel Exposure (CVE-2026-41940)',
+    description:
+      'Probes IP addresses and hostnames for exposed cPanel & WHM admin panels on ports 2082, 2083, 2086, 2087, 8080, 8443. ' +
+      'Fingerprints via X-cPanel-Version header, X-Powered-By: cpsrvd, Server: cpsrvd, and login page body signatures. ' +
+      'Attempts unauthenticated metadata enumeration via /json-api/version and /xml-api/version (CVE-2026-41940 vectors). ' +
+      'Flags installations running cPanel & WHM < 120.0.6 as potentially vulnerable to CVE-2026-41940 ' +
+      '(unauthenticated info disclosure / session token enumeration, CVSS 9.1 Critical). ' +
+      'Ideal for IP range sweeps of datacenter hosting environments.',
+    category: 'exposure',
+    clazz: 'passive',
+    severityDefault: 'critical',
+    stackFilters: ['any'],
+    owaspTags: ['A05-Security-Misconfiguration'],
+    cweTags: ['CWE-200'],
+    cveExamples: ['CVE-2026-41940'],
+    configSchema: {
+      type: 'object',
+      properties: {
+        ports: {
+          type: 'array',
+          default: [2083, 2087, 2082, 2086, 8443, 8080],
+        },
+        connectionTimeoutMs: { type: 'number', default: 6000 },
       },
     },
   }),
