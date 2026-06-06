@@ -14,7 +14,7 @@ function cloneOverrides(o) {
   return JSON.parse(JSON.stringify(o));
 }
 
-// ── Normal: passive-only ────────────────────────────────────────────────────────
+// ── Normal: passive-only ────────────────────────────────────────────────────────────
 const overridesNormal = baseOverrides();
 [
   'exposure.env.direct',
@@ -36,12 +36,15 @@ const overridesNormal = baseOverrides();
   }
 });
 
-// ── Aggressive: passive + basic injection (SQLi + XSS) ───────────────────────
+// ── Aggressive: passive + full injection suite ────────────────────────────────────
 const overridesAggressive = cloneOverrides(overridesNormal);
 [
   'injection.sqli.basic',
   'injection.xss.reflected_basic',
   'injection.path_traversal.basic',
+  'injection.cmdi.basic',
+  'injection.ssti.basic',
+  'injection.fileupload.detect',
 ].forEach((id) => {
   if (overridesAggressive[id]) {
     overridesAggressive[id].enabled       = true;
@@ -49,7 +52,7 @@ const overridesAggressive = cloneOverrides(overridesNormal);
   }
 });
 
-// ── Extreme: all modules — full active suite ─────────────────────────────────
+// ── Extreme: all modules — full active suite ───────────────────────────────────────
 const overridesExtreme = baseOverrides();
 for (const m of moduleDefs) {
   overridesExtreme[m.id].enabled       = true;
@@ -73,9 +76,10 @@ export const scanPolicies = [
   }),
   new ScanPolicy({
     id: 'policy_aggressive',
-    name: 'Aggressive (Passive + Basic Injection)',
+    name: 'Aggressive (Passive + Full Injection Suite)',
     description:
-      'All passive checks (including CVE fingerprints) plus basic SQLi, reflected XSS, and path traversal. ' +
+      'All passive checks (including CVE fingerprints) plus the full active injection suite: ' +
+      'SQLi, reflected XSS, path traversal, OS command injection, SSTI, and dangerous file upload detection. ' +
       'Only use on systems you are authorized to test actively.',
     moduleOverrides: overridesAggressive,
     globalLimits: {
