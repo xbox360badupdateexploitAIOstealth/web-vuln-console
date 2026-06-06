@@ -1,7 +1,7 @@
 // src/core/engine.js
 // Scan engine: passive exposure + TLS/headers + cookie/session + HTML crawl +
-// JS secret scan + active injection.
-// v1.3.0 — Phase 1b cookieSession + Phase 2.5 jsSecretScan wired (TODO-01, TODO-02).
+// JS secret scan + source map detect + active injection.
+// v1.4.0 — Phase 2.5 sourceMapDetect wired (TODO-03).
 
 import { ScanJob, Finding, Evidence } from './models.js';
 import { moduleDefById }               from './moduleRegistry.js';
@@ -13,6 +13,7 @@ import { runActiveInjectionChecks }    from './injection.js';
 import { runTlsHeaderChecks }          from './checks/tlsHeaders.js';
 import { runCookieSessionChecks }      from './checks/cookieSession.js';
 import { runJsSecretScan }             from './checks/jsSecretScan.js';
+import { runSourceMapDetect }          from './checks/sourceMapDetect.js';
 
 export class EngineConfig {
   constructor({ fetchAdapter, baseUrlResolver }) {
@@ -117,9 +118,20 @@ async function scanTarget({ ctx, target, enabledModules, engineConfig }) {
   const allEps   = siteModel.getAllEndpoints().length;
   ctx.log(`SiteModel: ${allEps} endpoints total, ${paramEps} with parameters.`);
 
-  // ── Phase 2.5: JS asset secret scan ────────────────────────────────────────────
+  // ── Phase 2.5a: JS asset secret scan ──────────────────────────────────────────
   if (moduleEnabled(enabledModules, 'exposure.js.secrets')) {
     await runJsSecretScan({
+      ctx,
+      target,
+      siteModel,
+      baseUrl,
+      fetchAdapter: engineConfig.fetchAdapter,
+    });
+  }
+
+  // ── Phase 2.5b: JS source map detection ───────────────────────────────────────
+  if (moduleEnabled(enabledModules, 'exposure.sourcemap')) {
+    await runSourceMapDetect({
       ctx,
       target,
       siteModel,
@@ -145,13 +157,13 @@ async function scanTarget({ ctx, target, enabledModules, engineConfig }) {
 async function runPassiveExposureChecks({ ctx, target, baseUrl, siteModel, enabledModules, engineConfig }) {
   const { fetchAdapter } = engineConfig;
 
-  if (moduleEnabled(enabledModules, 'exposure.env.direct'))          await checkEnvDirect        ({ ctx, target, baseUrl, fetchAdapter });
-  if (moduleEnabled(enabledModules, 'exposure.env.variants'))        await checkEnvVariants       ({ ctx, target, baseUrl, fetchAdapter });
-  if (moduleEnabled(enabledModules, 'exposure.backup.db_dumps'))     await checkDbDumps          ({ ctx, target, baseUrl, fetchAdapter });
-  if (moduleEnabled(enabledModules, 'exposure.backup.archives'))     await checkArchives         ({ ctx, target, baseUrl, fetchAdapter });
-  if (moduleEnabled(enabledModules, 'misconfig.dirlisting.generic')) await checkDirListing       ({ ctx, target, baseUrl, fetchAdapter });
-  if (moduleEnabled(enabledModules, 'vcs.git.exposed'))              await checkGitExposed       ({ ctx, target, baseUrl, fetchAdapter });
-  if (moduleEnabled(enabledModules, 'debug.stacktraces'))            await checkDebugErrors      ({ ctx, target, baseUrl, fetchAdapter });
+  if (moduleEnabled(enabledModules, 'exposure.env.direct'))          await checkEnvDirect    ({ ctx, target, baseUrl, fetchAdapter });
+  if (moduleEnabled(enabledModules, 'exposure.env.variants'))        await checkEnvVariants  ({ ctx, target, baseUrl, fetchAdapter });
+  if (moduleEnabled(enabledModules, 'exposure.backup.db_dumps'))     await checkDbDumps     ({ ctx, target, baseUrl, fetchAdapter });
+  if (moduleEnabled(enabledModules, 'exposure.backup.archives'))     await checkArchives    ({ ctx, target, baseUrl, fetchAdapter });
+  if (moduleEnabled(enabledModules, 'misconfig.dirlisting.generic')) await checkDirListing  ({ ctx, target, baseUrl, fetchAdapter });
+  if (moduleEnabled(enabledModules, 'vcs.git.exposed'))              await checkGitExposed  ({ ctx, target, baseUrl, fetchAdapter });
+  if (moduleEnabled(enabledModules, 'debug.stacktraces'))            await checkDebugErrors ({ ctx, target, baseUrl, fetchAdapter });
 }
 
 function moduleEnabled(mods, id) {
@@ -185,7 +197,7 @@ async function checkEnvDirect({ ctx, target, baseUrl, fetchAdapter }) {
   } catch (e) { ctx.log(`checkEnvDirect error: ${e.message || e}`); }
 }
 
-// ── .env variants ─────────────────────────────────────────────────────────────────────────
+// ── .env variants ────────────────────────────────────────────────────────────────────────
 async function checkEnvVariants({ ctx, target, baseUrl, fetchAdapter }) {
   const mod   = moduleDefById['exposure.env.variants'];
   const paths = mod?.configSchema?.properties?.paths?.default || [];
