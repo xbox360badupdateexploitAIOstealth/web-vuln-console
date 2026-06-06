@@ -350,6 +350,141 @@ export const moduleDefs = [
       properties: {},
     },
   }),
+  // ── CVE Passive: TODO-06 (Phase 1g) ───────────────────────────────────────────────────────────
+  new ModuleDef({
+    id: 'misconfig.phpinfo.exposed',
+    name: 'PHP Info / Debug Page Exposed',
+    description:
+      'Probes 10 paths for exposed phpinfo() pages, Symfony web profiler, and Apache server-info/status pages. ' +
+      'Paths: /phpinfo.php, /info.php, /php_info.php, /phpinfo, /debug, /debug.php, ' +
+      '/_profiler, /_profiler/phpinfo, /server-info, /server-status. ' +
+      'Detection: body signature matching (phpinfo(), PHP Version, php.ini, Symfony Profiler, ' +
+      'Apache Server Information, Server Status). ' +
+      'All three variants produce distinct finding titles for accurate reporting.',
+    category: 'misconfig',
+    clazz: 'passive',
+    severityDefault: 'critical',
+    stackFilters: ['any'],
+    owaspTags: ['A05-Security-Misconfiguration'],
+    cweTags: ['CWE-200'],
+    cveExamples: [],
+    configSchema: { type: 'object', properties: {} },
+  }),
+  new ModuleDef({
+    id: 'vcs.svn_hg.exposed',
+    name: 'SVN / Mercurial Repository Exposure',
+    description:
+      'Checks for exposed Subversion and Mercurial repository metadata files. ' +
+      'Probes: /.svn/entries (dir signature), /.svn/wc.db (SQLite signature), /.svn/format (status-only), ' +
+      '/.hg/manifest, /.hg/store/data, /.hg/requires (revlogv1 signature). ' +
+      'A hit allows full source code reconstruction using svn-extractor or hg-dumper.',
+    category: 'exposure',
+    clazz: 'passive',
+    severityDefault: 'critical',
+    stackFilters: ['any'],
+    owaspTags: ['A05-Security-Misconfiguration'],
+    cweTags: ['CWE-200'],
+    cveExamples: [],
+    configSchema: { type: 'object', properties: {} },
+  }),
+  new ModuleDef({
+    id: 'exposure.cve.vite_bypass',
+    name: 'Vite Dev Server Exposed / @fs LFI Bypass (CVE-2025-30208 / CVE-2025-46565)',
+    description:
+      'Fingerprints Vite dev servers via @vite/client, vite/dist/client, __vite_plugin, ' +
+      'type="module" script tags, and HMR WebSocket patterns. ' +
+      'On fingerprint confirmation: probes 6 @fs bypass and ?import&raw= LFI vectors ' +
+      'to confirm unauthenticated arbitrary file read (CVE-2025-30208 / CVE-2025-46565 / CVE-2026-46565). ' +
+      'Confirms hit if /etc/passwd (root:) or /proc/self/environ (PATH=) content is returned. ' +
+      'Emits critical on confirmed LFI, high on exposed-but-unconfirmed dev server. ' +
+      'Fix: never expose Vite dev server publicly; upgrade to Vite >= 6.2.4.',
+    category: 'exposure',
+    clazz: 'passive',
+    severityDefault: 'critical',
+    stackFilters: ['any'],
+    owaspTags: ['A01-Broken-Access-Control'],
+    cweTags: ['CWE-22', 'CWE-200'],
+    cveExamples: ['CVE-2025-30208', 'CVE-2025-46565', 'CVE-2026-46565'],
+    configSchema: { type: 'object', properties: {} },
+  }),
+  new ModuleDef({
+    id: 'exposure.cve.mautic_env',
+    name: 'Mautic .env Disclosure (CVE-2024-47056)',
+    description:
+      'Fingerprints Mautic marketing automation via /s/login login page. ' +
+      'On confirmation: probes /.env, /app/.env, /mautic/.env, /.env.local for ' +
+      'accessible dotenv files containing MAUTIC_SECRET_KEY, DB_PASSWORD, DATABASE_URL, ' +
+      'and mailer/integration credentials. ' +
+      'CVE-2024-47056: Mautic .env exposed when webroot not isolated from application root. ' +
+      'Key names logged only — values stored in Evidence for operator.',
+    category: 'exposure',
+    clazz: 'passive',
+    severityDefault: 'critical',
+    stackFilters: ['any'],
+    owaspTags: ['A02-Cryptographic-Failures'],
+    cweTags: ['CWE-312', 'CWE-359'],
+    cveExamples: ['CVE-2024-47056'],
+    configSchema: { type: 'object', properties: {} },
+  }),
+  new ModuleDef({
+    id: 'exposure.cve.moodle_listing',
+    name: 'Moodle Data Directory / r.php Exposure (CVE-2025-62396)',
+    description:
+      'Fingerprints Moodle LMS via /login/index.php (sesskey, moodledata body signatures). ' +
+      'On confirmation: probes /r.php, /lib/, /dataroot/, /moodledata/, /filedir/ ' +
+      'for directory listings (Index of /, Parent Directory) and r.php router exposure. ' +
+      'CVE-2025-62396: unauthenticated path disclosure via Moodle r.php router. ' +
+      'Directory listing on moodledata exposes student submissions and course content.',
+    category: 'exposure',
+    clazz: 'passive',
+    severityDefault: 'high',
+    stackFilters: ['any'],
+    owaspTags: ['A05-Security-Misconfiguration'],
+    cweTags: ['CWE-548', 'CWE-200'],
+    cveExamples: ['CVE-2025-62396'],
+    configSchema: { type: 'object', properties: {} },
+  }),
+  new ModuleDef({
+    id: 'exposure.cloud.open_bucket',
+    name: 'Open Cloud Storage Bucket (S3 / Azure / GCS)',
+    description:
+      'Derives candidate bucket names from the target hostname (strips www/api/cdn/TLD, ' +
+      'generates -assets/-media/-static/-uploads/-backup/-data/-files/-images/-prod/-dev variants). ' +
+      'Probes up to 10 candidate names × 4 cloud providers: ' +
+      'AWS S3 (virtual-hosted + path-style), Azure Blob Storage (container list), GCP GCS. ' +
+      'Validates responses via XML signature: ListBucketResult, <Contents>, EnumerationResults, <Blobs>. ' +
+      'A confirmed hit means full unauthenticated object enumeration and download.',
+    category: 'exposure',
+    clazz: 'passive',
+    severityDefault: 'critical',
+    stackFilters: ['any'],
+    owaspTags: ['A01-Broken-Access-Control'],
+    cweTags: ['CWE-284', 'CWE-200'],
+    cveExamples: [],
+    configSchema: { type: 'object', properties: {} },
+  }),
+  new ModuleDef({
+    id: 'exposure.cms.wp_debug',
+    name: 'WordPress Debug Artifacts Exposed',
+    description:
+      'Fingerprints WordPress via /wp-login.php, /wp-admin/, /wp-includes/js/jquery/jquery.min.js. ' +
+      'On confirmation: probes 6 debug artifact paths: ' +
+      '/wp-content/debug.log (PHP errors + stack traces), ' +
+      '/wp-config.php.bak (DB creds + secret keys — critical), ' +
+      '/wp-config.php~ (vim tilde backup — critical), ' +
+      '/wp-config.bak (critical), ' +
+      '/.wp-config.php.swp (vim swap file — critical), ' +
+      '/wp-content/uploads/.htaccess (PHP execution guard check — medium). ' +
+      'Each artifact produces an individual finding with appropriate severity.',
+    category: 'exposure',
+    clazz: 'passive',
+    severityDefault: 'critical',
+    stackFilters: ['any'],
+    owaspTags: ['A02-Cryptographic-Failures', 'A05-Security-Misconfiguration'],
+    cweTags: ['CWE-312', 'CWE-200'],
+    cveExamples: [],
+    configSchema: { type: 'object', properties: {} },
+  }),
   // ── Active: Injection ──────────────────────────────────────────────────────────────────────────
   new ModuleDef({
     id: 'injection.sqli.basic',
