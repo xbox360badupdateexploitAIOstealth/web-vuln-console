@@ -261,6 +261,57 @@ export const moduleDefs = [
       },
     },
   }),
+  // ── CVE: Laravel .env Hunt ────────────────────────────────────────────────────────────────
+  new ModuleDef({
+    id: 'exposure.cve.laravel_env_hunt',
+    name: 'Laravel .env Exposure & Secret Extraction (CVE-2024-55556 / CVE-2025-70841)',
+    description:
+      'Advanced Laravel dotenv hunter. Probes 56 paths across 7 categories: standard .env variants, ' +
+      'docroot-mismatch paths (public/, laravel/, backend/, api/), storage/bootstrap internals including laravel.log, ' +
+      'Dokan multi-vendor marketplace paths (CVE-2025-70841: /script/.env), ' +
+      'Laravel Forge/Envoyer/Ploi deployment paths (/../.env, /releases/current/.env), ' +
+      'Octane/Docker container paths (.env.docker, .docker/.env), ' +
+      'and CI/CD artifact paths (.env.ci, .env.github, .env.gitlab). ' +
+      'On any hit: extracts 50+ secret patterns (APP_KEY, DB_PASSWORD, DATABASE_URL, REDIS_PASSWORD, ' +
+      'MAIL_PASSWORD, AWS_SECRET_ACCESS_KEY, STRIPE_SECRET, STRIPE_WEBHOOK_SECRET, JWT_SECRET, ' +
+      'PASSPORT_CLIENT_SECRET, OAUTH_CLIENT_SECRET, OPENAI_API_KEY, ANTHROPIC_API_KEY, ' +
+      'PAYPAL_SECRET, BRAINTREE_PRIVATE_KEY, SENTRY_DSN, ENCRYPTION_KEY, and more). ' +
+      'APP_KEY analysis: validates base64: prefix, checks 32-byte AES-256 key length, ' +
+      'annotates deserialization RCE risk (CVE-2024-55556 Crater Invoice / Laravel gadget chain pattern). ' +
+      'Cloud DB risk scoring: flags DB_HOST matching 14 cloud providers (RDS, PlanetScale, Supabase, ' +
+      'Neon, Railway, CockroachDB, Turso, Azure MySQL/Postgres, GCP CloudSQL, DigitalOcean, etc.). ' +
+      'Supplementary checks: Laravel Ignition debug mode probe, composer.lock/composer.json exposure ' +
+      '(extracts laravel/framework version to confirm CVE-2024-55556 RCE exploitability). ' +
+      'Laravel fingerprinting via XSRF-TOKEN cookie, X-Laravel-Version header, robots.txt Telescope/Horizon paths. ' +
+      'Severity escalation: critical on APP_KEY, AWS keys, Stripe secret, DB_PASSWORD + cloud host, JWT_SECRET; ' +
+      'minimum high for any .env hit. Secrets redacted in logs (first6***), full value in Evidence for operator.',
+    category: 'exposure',
+    clazz: 'passive',
+    severityDefault: 'critical',
+    stackFilters: ['any'],
+    owaspTags: ['A02-Cryptographic-Failures', 'A05-Security-Misconfiguration'],
+    cweTags: ['CWE-312', 'CWE-798', 'CWE-359', 'CWE-209'],
+    cveExamples: ['CVE-2024-55556', 'CVE-2025-70841'],
+    configSchema: {
+      type: 'object',
+      properties: {
+        skipFingerprintGate: {
+          type: 'boolean',
+          default: false,
+          description: 'If true, probe all paths even when no Laravel signals are detected (default: probe anyway).',
+        },
+        maxBodyBytes: {
+          type: 'number',
+          default: 131072,
+          description: 'Max bytes to read from each .env response.',
+        },
+        connectionTimeoutMs: {
+          type: 'number',
+          default: 7000,
+        },
+      },
+    },
+  }),
   // ── CVE: Framework & Product Fingerprints (Phase 1e) ─────────────────────────────────────
   new ModuleDef({
     id: 'cve.fingerprints',
