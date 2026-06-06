@@ -50,6 +50,55 @@
     </div>
   </div>
 
+  <!-- ══════════════════════════════════════════════════════════
+       NEW PROJECT MODAL
+       ══════════════════════════════════════════════════════════ -->
+  <div id="project-modal-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="project-modal-title">
+    <div class="modal-box" id="project-modal-box" style="max-width:480px;">
+
+      <div class="modal-header">
+        <span id="project-modal-title" style="font-size:14px;font-weight:700;color:#f1f5f9;">📁 New Project</span>
+        <button class="modal-close" id="project-modal-close">✕</button>
+      </div>
+
+      <div style="padding:16px;display:flex;flex-direction:column;gap:12px;">
+
+        <div>
+          <label class="settings-label" for="pm-name">Project Name <span style="color:var(--red)">*</span></label>
+          <input class="input-text" id="pm-name" type="text" placeholder="e.g. Acme Corp Q2 Pentest" autocomplete="off" />
+          <div id="pm-name-err" style="color:var(--red);font-size:11px;margin-top:3px;display:none;">Name is required.</div>
+        </div>
+
+        <div>
+          <label class="settings-label" for="pm-client">Client Name / Ticket ID</label>
+          <input class="input-text" id="pm-client" type="text" placeholder="e.g. ACME-2026-001 (optional)" autocomplete="off" />
+        </div>
+
+        <div>
+          <label class="settings-label" for="pm-scope">Scope Notes</label>
+          <textarea class="input-textarea" id="pm-scope" rows="3"
+            placeholder="What's in scope? e.g. *.acme.com, exclude staging.acme.com"></textarea>
+        </div>
+
+        <div>
+          <label class="settings-label" for="pm-policy">Default Scan Policy</label>
+          <select class="select-sm" id="pm-policy" style="width:100%;padding:7px 10px;font-size:12px;">
+            <option value="policy_normal">Normal — passive only (safe)</option>
+            <option value="policy_aggressive">Aggressive — SQLi + XSS probes</option>
+            <option value="policy_extreme">Extreme — full active + path traversal</option>
+          </select>
+        </div>
+
+      </div>
+
+      <div class="modal-actions" style="border-top:1px solid #1e293b;padding:12px 16px;justify-content:flex-end;">
+        <button class="btn btn-ghost" id="project-modal-cancel">Cancel</button>
+        <button class="btn btn-primary" id="project-modal-save">Create Project</button>
+      </div>
+
+    </div>
+  </div>
+
   <!-- App Shell -->
   <div id="app" class="app hidden">
 
@@ -112,9 +161,23 @@
 
         <!-- Projects -->
         <div class="page" id="page-projects">
-          <div class="section-title">Projects
-            <button class="btn btn-sm btn-primary" id="btn-create-project">+ New</button>
+          <div class="section-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+            <span>Projects
+              <span id="projects-count-badge" style="font-size:11px;opacity:.5;margin-left:6px;"></span>
+            </span>
+            <div style="display:flex;gap:6px;">
+              <input class="input-text" id="project-search" type="text"
+                placeholder="🔍 Filter projects…"
+                style="width:180px;padding:5px 10px;font-size:12px;"
+                oninput="filterProjectList(this.value)" />
+              <button class="btn btn-sm btn-primary" id="btn-create-project">+ New</button>
+            </div>
           </div>
+          <!-- Summary bar: total findings across all projects -->
+          <div id="projects-summary-bar" style="display:none;
+            background:#0f172a;border:1px solid #1e293b;border-radius:6px;
+            padding:10px 14px;margin-bottom:10px;font-size:12px;
+            display:flex;gap:20px;flex-wrap:wrap;align-items:center;"></div>
           <div id="project-list"></div>
         </div>
 
