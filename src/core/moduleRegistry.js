@@ -588,6 +588,151 @@ export const moduleDefs = [
       },
     },
   }),
+  // ── Active: Injection (TODO-07) ────────────────────────────────────────────────────────────
+  new ModuleDef({
+    id: 'injection.cmdi.basic',
+    name: 'OS Command Injection Probes',
+    description:
+      'Injects OS command separator payloads into query parameters and checks for system-level output. ' +
+      'Payloads: ; id, & whoami, | id, `id`, $(id), ; id #, | whoami #, & id &. ' +
+      'Detection signatures: uid=, gid=, root:, /bin/, /usr/, /home/, ' +
+      'Administrator, WINDOWS, Volume Serial output patterns. ' +
+      'A confirmed hit indicates Remote Code Execution via command injection (CVSS 9.8+). ' +
+      'Only runs on parameterized endpoints discovered by the crawler.',
+    category: 'injection',
+    clazz: 'active',
+    severityDefault: 'critical',
+    stackFilters: ['any'],
+    owaspTags: ['A03-Injection'],
+    cweTags: ['CWE-78'],
+    cveExamples: [],
+    configSchema: {
+      type: 'object',
+      properties: {
+        payloads: {
+          type: 'array',
+          default: [
+            '; id',
+            '& whoami',
+            '| id',
+            '`id`',
+            '$(id)',
+            '; id #',
+            '| whoami #',
+            '& id &',
+          ],
+        },
+        signatures: {
+          type: 'array',
+          default: [
+            'uid=',
+            'gid=',
+            'root:',
+            '/bin/',
+            '/usr/',
+            '/home/',
+            'Administrator',
+            'WINDOWS',
+            'Volume Serial',
+          ],
+        },
+      },
+    },
+  }),
+  new ModuleDef({
+    id: 'injection.ssti.basic',
+    name: 'Server-Side Template Injection (SSTI) Probes',
+    description:
+      'Injects template expression payloads into query parameters and checks for math evaluation or engine errors. ' +
+      'Payload pairs (input → expected): {{7*7}} → 49, ${7*7} → 49, #{7*7} → 49, ' +
+      '<%= 7*7 %> → 49, ${{7*7}} → 49, {{7*"7"}} → 7777777 (Jinja2 string mul). ' +
+      'Error patterns: TemplateSyntaxError, Twig_Error, RenderError, JinjaUndefined, ' +
+      'freemarker.template, velocity, Smarty parse error, template rendering. ' +
+      'A math-result hit strongly indicates SSTI — potential RCE via template sandbox escape. ' +
+      'Only runs on parameterized endpoints discovered by the crawler.',
+    category: 'injection',
+    clazz: 'active',
+    severityDefault: 'critical',
+    stackFilters: ['any'],
+    owaspTags: ['A03-Injection'],
+    cweTags: ['CWE-94'],
+    cveExamples: [],
+    configSchema: {
+      type: 'object',
+      properties: {
+        payloads: {
+          type: 'array',
+          default: [
+            { payload: '{{7*7}}',      expected: '49'      },
+            { payload: '${7*7}',       expected: '49'      },
+            { payload: '#{7*7}',       expected: '49'      },
+            { payload: '<%= 7*7 %>',   expected: '49'      },
+            { payload: '${{7*7}}',     expected: '49'      },
+            { payload: '{{7*"7"}}',    expected: '7777777' },
+          ],
+        },
+        errorPatterns: {
+          type: 'array',
+          default: [
+            'TemplateSyntaxError',
+            'Twig_Error',
+            'RenderError',
+            'JinjaUndefined',
+            'freemarker.template',
+            'org.apache.velocity',
+            'Smarty parse error',
+            'template rendering',
+            'TemplateException',
+          ],
+        },
+      },
+    },
+  }),
+  new ModuleDef({
+    id: 'injection.fileupload.detect',
+    name: 'Dangerous File Upload Detection',
+    description:
+      'Detects file upload endpoints and tests whether dangerous file extensions are accepted. ' +
+      'Step 1: Probe reachability of upload endpoints (from SiteModel or common fallback paths). ' +
+      'Step 2: POST a benign .txt file via multipart/form-data to confirm uploads are accepted. ' +
+      'Step 3: POST files with dangerous extensions (.php, .php5, .phtml, .jsp, .aspx, .shtml, .phar) — ' +
+      'if accepted without rejection, flag as critical (potential web shell upload / RCE). ' +
+      'Rejection detection: checks response body for "not allowed", "invalid type", ' +
+      '"file type", "extension", "only", "blocked". ' +
+      'Common fallback upload paths: /upload, /uploads, /file-upload, /api/upload, /media/upload, ' +
+      '/assets/upload, /image-upload, /avatar, /profile/avatar, /document-upload.',
+    category: 'injection',
+    clazz: 'active',
+    severityDefault: 'critical',
+    stackFilters: ['any'],
+    owaspTags: ['A03-Injection'],
+    cweTags: ['CWE-434'],
+    cveExamples: [],
+    configSchema: {
+      type: 'object',
+      properties: {
+        commonUploadPaths: {
+          type: 'array',
+          default: [
+            '/upload', '/uploads', '/file-upload', '/api/upload',
+            '/media/upload', '/assets/upload', '/image-upload',
+            '/avatar', '/profile/avatar', '/document-upload',
+          ],
+        },
+        testExtensions: {
+          type: 'array',
+          default: ['.php', '.php5', '.phtml', '.jsp', '.aspx', '.shtml', '.phar'],
+        },
+        dangerSignatures: {
+          type: 'array',
+          default: [
+            'not allowed', 'invalid type', 'file type',
+            'extension', 'only', 'blocked',
+          ],
+        },
+      },
+    },
+  }),
   // ── Passive: TLS & Headers ──────────────────────────────────────────────────────────────────
   new ModuleDef({
     id: 'tls.headers.basic',
@@ -614,187 +759,6 @@ export const moduleDefs = [
             'Referrer-Policy',
           ],
         },
-      },
-    },
-  }),
-
-  // ── NEW: Passive: Tech Fingerprint ──────────────────────────────────────────────────────────
-  new ModuleDef({
-    id: 'recon.tech_fingerprint',
-    name: 'Technology Stack Fingerprinting',
-    description:
-      'Single GET to site root. Detects CMS (8), frameworks (11), CDN/server layers (9) ' +
-      'via response headers, cookies, meta tags, and HTML signatures. ' +
-      'Populates siteModel.techStack for all downstream modules to consume. ' +
-      'Runs first in Phase 1b before any probing.',
-    category: 'recon',
-    clazz: 'passive',
-    severityDefault: 'info',
-    stackFilters: ['any'],
-    owaspTags: ['A05-Security-Misconfiguration'],
-    cweTags: ['CWE-200'],
-    cveExamples: [],
-    configSchema: { type: 'object', properties: {} },
-  }),
-
-  // ── NEW: Passive: phpinfo() Exposure ────────────────────────────────────────────────────────
-  new ModuleDef({
-    id: 'exposure.phpinfo',
-    name: 'phpinfo() Page Exposure',
-    description:
-      'Probes 15 common paths for exposed phpinfo() output pages. ' +
-      'Confirms via 8 phpinfo-specific body signatures (not just HTTP 200). ' +
-      'Extracts exact PHP version string. Enriches siteModel.techStack.language. ' +
-      'Severity: critical.',
-    category: 'exposure',
-    clazz: 'passive',
-    severityDefault: 'critical',
-    stackFilters: ['any'],
-    owaspTags: ['A05-Security-Misconfiguration'],
-    cweTags: ['CWE-200'],
-    cveExamples: [],
-    configSchema: { type: 'object', properties: {} },
-  }),
-
-  // ── NEW: Passive: Admin Panel Detection ─────────────────────────────────────────────────────
-  new ModuleDef({
-    id: 'exposure.admin_panels',
-    name: 'Admin Panel & Login Page Detection',
-    description:
-      '28 panel definitions: WordPress, Joomla, Drupal, phpMyAdmin, Adminer, ' +
-      'Grafana, Kibana, Jenkins, SonarQube, Portainer, Traefik, Vault, RabbitMQ, ' +
-      'Kubernetes Dashboard, cPanel, WHM, and generic paths. ' +
-      'CMS-hinted panels skipped if that CMS not detected by techFingerprint. ' +
-      'Two tiers: critical (unauthenticated open access) and medium (login page exposed). ' +
-      'Deduplicates reported URLs.',
-    category: 'exposure',
-    clazz: 'passive',
-    severityDefault: 'critical',
-    stackFilters: ['any'],
-    owaspTags: ['A01-Broken-Access-Control', 'A05-Security-Misconfiguration'],
-    cweTags: ['CWE-306', 'CWE-200'],
-    cveExamples: [],
-    configSchema: { type: 'object', properties: {} },
-  }),
-
-  // ── NEW: Passive: CORS Misconfiguration ─────────────────────────────────────────────────────
-  new ModuleDef({
-    id: 'misconfig.cors',
-    name: 'CORS Misconfiguration',
-    description:
-      'Three vulnerability classes: ' +
-      '(A) origin reflection — critical if with credentials, high without; ' +
-      '(B) wildcard + credentials — high; ' +
-      '(C) null origin accepted — medium. ' +
-      'Probes root URL always + up to 20 siteModel endpoints post-crawler.',
-    category: 'misconfig',
-    clazz: 'passive',
-    severityDefault: 'high',
-    stackFilters: ['any'],
-    owaspTags: ['A05-Security-Misconfiguration'],
-    cweTags: ['CWE-942'],
-    cveExamples: [],
-    configSchema: {
-      type: 'object',
-      properties: {
-        maxEndpoints: { type: 'number', default: 20 },
-      },
-    },
-  }),
-
-  // ── NEW: Passive: HTTP Methods ──────────────────────────────────────────────────────────────
-  new ModuleDef({
-    id: 'misconfig.http_methods',
-    name: 'Dangerous HTTP Methods Detection',
-    description:
-      'OPTIONS probe to detect dangerous methods in Allow header: ' +
-      'TRACE/TRACK (XST — confirmed with real TRACE + marker echo), ' +
-      'PUT/DELETE on non-API paths (high — WebDAV file upload/deletion), ' +
-      'WebDAV methods (medium), CONNECT (medium). ' +
-      'Probes root + up to 10 siteModel endpoints.',
-    category: 'misconfig',
-    clazz: 'passive',
-    severityDefault: 'medium',
-    stackFilters: ['any'],
-    owaspTags: ['A05-Security-Misconfiguration'],
-    cweTags: ['CWE-693', 'CWE-650', 'CWE-434'],
-    cveExamples: [],
-    configSchema: {
-      type: 'object',
-      properties: {
-        maxEndpoints: { type: 'number', default: 10 },
-      },
-    },
-  }),
-
-  // ── NEW: Passive: API Endpoint Exposure ─────────────────────────────────────────────────────
-  new ModuleDef({
-    id: 'exposure.api_endpoints',
-    name: 'API Documentation & GraphQL Exposure',
-    description:
-      'Detects: Swagger/OpenAPI UI (medium, 13 paths), ' +
-      'raw OpenAPI spec JSON/YAML (medium, 16 paths — extracts title + version), ' +
-      'GraphQL introspection enabled (high — POST introspection query + schema confirmation), ' +
-      'GraphQL endpoint exposed with introspection disabled (low, 12 paths).',
-    category: 'exposure',
-    clazz: 'passive',
-    severityDefault: 'medium',
-    stackFilters: ['any'],
-    owaspTags: ['A05-Security-Misconfiguration'],
-    cweTags: ['CWE-200'],
-    cveExamples: [],
-    configSchema: { type: 'object', properties: {} },
-  }),
-
-  // ── NEW: Active: Open Redirect ──────────────────────────────────────────────────────────────
-  new ModuleDef({
-    id: 'injection.open_redirect',
-    name: 'Open Redirect',
-    description:
-      'Active: probes parameterised endpoints with 10 redirect payloads ' +
-      '(including UNC, tab-encoded, double-slash bypass variants). ' +
-      'Prioritises params named next/redirect/return_to/url/goto etc. ' +
-      'Detects via 3xx Location header, meta-refresh, and JS window.location. ' +
-      'Cap: 50 endpoints × 150 total probes. Severity: high.',
-    category: 'injection',
-    clazz: 'active',
-    severityDefault: 'high',
-    stackFilters: ['any'],
-    owaspTags: ['A01-Broken-Access-Control'],
-    cweTags: ['CWE-601'],
-    cveExamples: [],
-    configSchema: {
-      type: 'object',
-      properties: {
-        maxEndpoints: { type: 'number', default: 50  },
-        maxProbes:    { type: 'number', default: 150 },
-      },
-    },
-  }),
-
-  // ── NEW: Active: SSRF ───────────────────────────────────────────────────────────────────────
-  new ModuleDef({
-    id: 'injection.ssrf.basic',
-    name: 'SSRF — Cloud Metadata & Internal Service Probe',
-    description:
-      'Active: injects 10 SSRF payloads into URL-type params ' +
-      '(url/uri/src/fetch/proxy/webhook etc. — prioritised). ' +
-      'Targets: AWS IMDSv1, AWS IAM creds, AWS user-data, GCP metadata + SA token, ' +
-      'Azure IMDS + managed identity token, DigitalOcean metadata, localhost. ' +
-      'Escalates to critical if IAM/managed-identity token content confirmed. ' +
-      'Cap: 30 endpoints × 100 total probes.',
-    category: 'injection',
-    clazz: 'active',
-    severityDefault: 'high',
-    stackFilters: ['any'],
-    owaspTags: ['A10-Server-Side-Request-Forgery'],
-    cweTags: ['CWE-918'],
-    cveExamples: [],
-    configSchema: {
-      type: 'object',
-      properties: {
-        maxEndpoints: { type: 'number', default: 30  },
-        maxProbes:    { type: 'number', default: 100 },
       },
     },
   }),
