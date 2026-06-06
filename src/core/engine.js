@@ -1,7 +1,7 @@
 // src/core/engine.js
 // Scan engine: passive exposure + TLS/headers + cookie/session + HTML crawl +
-// JS secret scan + source map detect + cPanel/WHM scan + active injection.
-// v1.5.0 — Phase 1d cPanelWhm wired (TODO-04).
+// JS secret scan + source map detect + cPanel/WHM scan + CVE fingerprints + active injection.
+// v1.6.0 — Phase 1e cveFingerprints wired (TODO-26 CVE checks).
 
 import { ScanJob, Finding, Evidence } from './models.js';
 import { moduleDefById }               from './moduleRegistry.js';
@@ -15,6 +15,7 @@ import { runCookieSessionChecks }      from './checks/cookieSession.js';
 import { runJsSecretScan }             from './checks/jsSecretScan.js';
 import { runSourceMapDetect }          from './checks/sourceMapDetect.js';
 import { runCPanelWhmScan }            from './checks/cPanelWhm.js';
+import { runCveFingerprints }          from './checks/cveFingerprints.js';
 
 export class EngineConfig {
   constructor({ fetchAdapter, baseUrlResolver }) {
@@ -81,10 +82,10 @@ async function scanTarget({ ctx, target, enabledModules, engineConfig }) {
   ctx.log(`\n--- Scanning target: ${target.host} (${baseUrl}) ---`);
   const siteModel = ctx.getOrCreateSiteModel(target.id);
 
-  // ── Phase 1: Passive exposure checks ──────────────────────────────────────────────
+  // ── Phase 1: Passive exposure checks ─────────────────────────────────────────────
   await runPassiveExposureChecks({ ctx, target, baseUrl, siteModel, enabledModules, engineConfig });
 
-  // ── Phase 1b: TLS & security headers ───────────────────────────────────────────
+  // ── Phase 1b: TLS & security headers ──────────────────────────────────────────
   if (moduleEnabled(enabledModules, 'tls.headers.basic')) {
     await runTlsHeaderChecks({
       ctx,
@@ -94,7 +95,7 @@ async function scanTarget({ ctx, target, enabledModules, engineConfig }) {
     });
   }
 
-  // ── Phase 1c: Cookie & session security ───────────────────────────────────────
+  // ── Phase 1c: Cookie & session security ──────────────────────────────────────
   if (moduleEnabled(enabledModules, 'cookie.session.flags')) {
     await runCookieSessionChecks({
       ctx,
@@ -104,11 +105,21 @@ async function scanTarget({ ctx, target, enabledModules, engineConfig }) {
     });
   }
 
-  // ── Phase 1d: cPanel / WHM IP scan ─────────────────────────────────────────────
+  // ── Phase 1d: cPanel / WHM IP scan ───────────────────────────────────────────
   if (moduleEnabled(enabledModules, 'exposure.cve.cpanel_whm')) {
     await runCPanelWhmScan({
       ctx,
       target,
+      fetchAdapter: engineConfig.fetchAdapter,
+    });
+  }
+
+  // ── Phase 1e: CVE fingerprint checks ──────────────────────────────────────────
+  if (moduleEnabled(enabledModules, 'cve.fingerprints')) {
+    await runCveFingerprints({
+      ctx,
+      target,
+      baseUrl,
       fetchAdapter: engineConfig.fetchAdapter,
     });
   }
@@ -200,7 +211,7 @@ async function checkEnvDirect({ ctx, target, baseUrl, fetchAdapter }) {
       });
       ctx.addFinding(finding);
       ctx.addEvidence(new Evidence({ findingId: finding.id, url, method: 'GET', responseStatus: res.status, responseHeadersSnippet: JSON.stringify(res.headers).slice(0, 512), responseBodySnippet: res.body.slice(0, 2048), matchedPattern: 'dotenv key=value pairs' }));
-      ctx.log(`🔴 CRITICAL: .env exposed at ${url}`);
+      ctx.log(`\uD83D\uDD34 CRITICAL: .env exposed at ${url}`);
     } else {
       ctx.log(`No .env exposure at ${url} (status ${res.status})`);
     }
@@ -228,13 +239,13 @@ async function checkEnvVariants({ ctx, target, baseUrl, fetchAdapter }) {
         });
         ctx.addFinding(finding);
         ctx.addEvidence(new Evidence({ findingId: finding.id, url, method: 'GET', responseStatus: res.status, responseHeadersSnippet: JSON.stringify(res.headers).slice(0, 512), responseBodySnippet: res.body.slice(0, 2048), matchedPattern: 'dotenv key=value pairs' }));
-        ctx.log(`🔴 CRITICAL: .env variant exposed at ${url}`);
+        ctx.log(`\uD83D\uDD34 CRITICAL: .env variant exposed at ${url}`);
       }
     } catch (e) { ctx.log(`checkEnvVariants error: ${e.message || e}`); }
   }
 }
 
-// ── DB dumps ──────────────────────────────────────────────────────────────────────────
+// ── DB dumps ────────────────────────────────────────────────────────────────────────
 async function checkDbDumps({ ctx, target, baseUrl, fetchAdapter }) {
   const mod   = moduleDefById['exposure.backup.db_dumps'];
   const paths = mod?.configSchema?.properties?.candidateNames?.default || [];
@@ -255,13 +266,13 @@ async function checkDbDumps({ ctx, target, baseUrl, fetchAdapter }) {
         });
         ctx.addFinding(finding);
         ctx.addEvidence(new Evidence({ findingId: finding.id, url, method: 'GET', responseStatus: res.status, responseHeadersSnippet: JSON.stringify(res.headers).slice(0, 512), responseBodySnippet: res.body.slice(0, 2048), matchedPattern: 'SQL dump (CREATE TABLE / INSERT INTO)' }));
-        ctx.log(`🔴 CRITICAL: DB dump exposed at ${url}`);
+        ctx.log(`\uD83D\uDD34 CRITICAL: DB dump exposed at ${url}`);
       }
     } catch (e) { ctx.log(`checkDbDumps error: ${e.message || e}`); }
   }
 }
 
-// ── Archives ──────────────────────────────────────────────────────────────────────────
+// ── Archives ────────────────────────────────────────────────────────────────────────
 async function checkArchives({ ctx, target, baseUrl, fetchAdapter }) {
   const mod   = moduleDefById['exposure.backup.archives'];
   const paths = mod?.configSchema?.properties?.candidateNames?.default || [];
@@ -282,7 +293,7 @@ async function checkArchives({ ctx, target, baseUrl, fetchAdapter }) {
         });
         ctx.addFinding(finding);
         ctx.addEvidence(new Evidence({ findingId: finding.id, url, method: 'GET', responseStatus: res.status, responseHeadersSnippet: JSON.stringify(res.headers).slice(0, 512), responseBodySnippet: '', matchedPattern: 'Archive content-type' }));
-        ctx.log(`🟠 HIGH: backup archive exposed at ${url}`);
+        ctx.log(`\uD83D\uDFE0 HIGH: backup archive exposed at ${url}`);
       }
     } catch (e) { ctx.log(`checkArchives error: ${e.message || e}`); }
   }
@@ -309,7 +320,7 @@ async function checkDirListing({ ctx, target, baseUrl, fetchAdapter }) {
         });
         ctx.addFinding(finding);
         ctx.addEvidence(new Evidence({ findingId: finding.id, url, method: 'GET', responseStatus: res.status, responseHeadersSnippet: JSON.stringify(res.headers).slice(0, 512), responseBodySnippet: res.body.slice(0, 2048), matchedPattern: 'Index of / listing' }));
-        ctx.log(`🟡 MEDIUM: directory listing at ${url}`);
+        ctx.log(`\uD83D\uDFE1 MEDIUM: directory listing at ${url}`);
       }
     } catch (e) { ctx.log(`checkDirListing error: ${e.message || e}`); }
   }
@@ -336,7 +347,7 @@ async function checkGitExposed({ ctx, target, baseUrl, fetchAdapter }) {
         });
         ctx.addFinding(finding);
         ctx.addEvidence(new Evidence({ findingId: finding.id, url, method: 'GET', responseStatus: res.status, responseHeadersSnippet: JSON.stringify(res.headers).slice(0, 512), responseBodySnippet: res.body.slice(0, 2048), matchedPattern: '.git file content' }));
-        ctx.log(`🟠 HIGH: .git exposed at ${url}`);
+        ctx.log(`\uD83D\uDFE0 HIGH: .git exposed at ${url}`);
         break;
       }
     } catch (e) { ctx.log(`checkGitExposed error: ${e.message || e}`); }
@@ -361,7 +372,7 @@ async function checkDebugErrors({ ctx, target, baseUrl, fetchAdapter }) {
       });
       ctx.addFinding(finding);
       ctx.addEvidence(new Evidence({ findingId: finding.id, url, method: 'GET', responseStatus: res.status, responseHeadersSnippet: JSON.stringify(res.headers).slice(0, 512), responseBodySnippet: res.body.slice(0, 2048), matchedPattern: 'Stack trace markers' }));
-      ctx.log(`🟡 MEDIUM: stack trace leakage at ${url}`);
+      ctx.log(`\uD83D\uDFE1 MEDIUM: stack trace leakage at ${url}`);
     } else {
       ctx.log(`No debug errors at ${url} (status ${res.status})`);
     }
