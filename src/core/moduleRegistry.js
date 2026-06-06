@@ -261,6 +261,44 @@ export const moduleDefs = [
       },
     },
   }),
+  // ── CVE: Framework & Product Fingerprints (Phase 1e) ─────────────────────────────────────
+  new ModuleDef({
+    id: 'cve.fingerprints',
+    name: 'CVE Fingerprint Checks (2025–2026)',
+    description:
+      'Passive HTTP fingerprint checks for 15 high-impact 2025–2026 CVEs. ' +
+      'Detects: Nginx UI unauth API (CVE-2026-27944/33032), Craft CMS RCE (CVE-2025-32432), ' +
+      'Laravel Livewire SSTI (CVE-2025-54068), Next.js RSC (CVE-2025-55182), ' +
+      'n8n unauth settings (CVE-2026-25049), Langflow RCE API (CVE-2026-33017), ' +
+      'FortiGate auth bypass (CVE-2026-24858), Ivanti path traversal (CVE-2026-1603), ' +
+      'HPE Aruba unauth REST (CVE-2026-23813), Vite dev server LFI (CVE-2025-30208/CVE-2026-46565), ' +
+      'MindsDB path traversal (CVE-2026-27483), SharePoint deserialization (CVE-2026-20963), ' +
+      'Oracle WebLogic RCE (CVE-2026-21962), Cisco FMC RCE (CVE-2026-20131), ' +
+      'Modular DS WordPress auth bypass (CVE-2026-23550). ' +
+      'All probes are GET-only, no payloads, no state modification.',
+    category: 'cve',
+    clazz: 'passive',
+    severityDefault: 'high',
+    stackFilters: ['any'],
+    owaspTags: [
+      'A01-Broken-Access-Control',
+      'A05-Security-Misconfiguration',
+      'A07-Identification-and-Authentication-Failures',
+      'A08-Software-and-Data-Integrity-Failures',
+    ],
+    cweTags: ['CWE-306', 'CWE-287', 'CWE-502', 'CWE-22', 'CWE-94'],
+    cveExamples: [
+      'CVE-2026-27944', 'CVE-2026-33032', 'CVE-2025-32432', 'CVE-2025-54068',
+      'CVE-2025-55182', 'CVE-2026-25049', 'CVE-2026-33017', 'CVE-2026-24858',
+      'CVE-2026-1603',  'CVE-2026-23813', 'CVE-2025-30208', 'CVE-2026-46565',
+      'CVE-2026-27483', 'CVE-2026-20963', 'CVE-2026-21962', 'CVE-2026-20131',
+      'CVE-2026-23550',
+    ],
+    configSchema: {
+      type: 'object',
+      properties: {},
+    },
+  }),
   // ── Active: Injection ──────────────────────────────────────────────────────────────────────────
   new ModuleDef({
     id: 'injection.sqli.basic',
