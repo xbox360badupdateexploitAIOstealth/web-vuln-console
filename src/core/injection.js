@@ -1,5 +1,5 @@
 // src/core/injection.js
-// Active injection checks: SQLi, reflected XSS, and path traversal.
+// Active injection checks: SQLi, reflected XSS, path traversal, command injection, SSTI, file upload.
 // Called from engine.js Phase 3 after crawler builds the SiteModel.
 
 import { moduleDefById } from './moduleRegistry.js';
@@ -20,22 +20,25 @@ const SEVERITY_RANK = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
  * @param {Object} opts.engineConfig   - EngineConfig
  */
 export async function runActiveInjectionChecks({ ctx, target, siteModel, enabledModules, engineConfig }) {
-  const sqliEnabled     = moduleEnabled(enabledModules, 'injection.sqli.basic');
-  const xssEnabled      = moduleEnabled(enabledModules, 'injection.xss.reflected_basic');
-  const traversalEnabled = moduleEnabled(enabledModules, 'injection.path_traversal.basic');
+  const sqliEnabled       = moduleEnabled(enabledModules, 'injection.sqli.basic');
+  const xssEnabled        = moduleEnabled(enabledModules, 'injection.xss.reflected_basic');
+  const traversalEnabled  = moduleEnabled(enabledModules, 'injection.path_traversal.basic');
+  const cmdiEnabled       = moduleEnabled(enabledModules, 'injection.cmdi.basic');
+  const sstiEnabled       = moduleEnabled(enabledModules, 'injection.ssti.basic');
+  const uploadEnabled     = moduleEnabled(enabledModules, 'injection.fileupload.detect');
 
-  if (!sqliEnabled && !xssEnabled && !traversalEnabled) {
+  if (!sqliEnabled && !xssEnabled && !traversalEnabled && !cmdiEnabled && !sstiEnabled && !uploadEnabled) {
     ctx.log('Active injection: no injection modules enabled for this policy — skipping.');
     return;
   }
 
   const base = normalizeBase(target.host);
 
-  // ── Endpoint-based probes (SQLi + XSS) ──────────────────────────────────────
+  // ── Endpoint-based probes (SQLi + XSS + CMDi + SSTI) ────────────────────────
   const endpoints = siteModel.getParamEndpoints();
 
-  if ((sqliEnabled || xssEnabled) && endpoints.length === 0) {
-    ctx.log('Active injection: crawler found no parameterized endpoints — skipping SQLi/XSS probes.');
+  if ((sqliEnabled || xssEnabled || cmdiEnabled || sstiEnabled) && endpoints.length === 0) {
+    ctx.log('Active injection: crawler found no parameterized endpoints — skipping param-based probes.');
     ctx.log('TIP: Try policy_aggressive on a target with forms or query-string pages.');
   }
 
@@ -64,11 +67,24 @@ export async function runActiveInjectionChecks({ ctx, target, siteModel, enabled
       const count = await runXssOnEndpoint({ ctx, target, urlBase, paramNames, engineConfig });
       totalProbes += count;
     }
+    if (cmdiEnabled && totalProbes < MAX_PROBES) {
+      const count = await runCommandInjection({ ctx, target, urlBase, paramNames, engineConfig });
+      totalProbes += count;
+    }
+    if (sstiEnabled && totalProbes < MAX_PROBES) {
+      const count = await runSstiChecks({ ctx, target, urlBase, paramNames, engineConfig });
+      totalProbes += count;
+    }
   }
 
   // ── Path traversal (runs against the base URL directly, no params needed) ───
   if (traversalEnabled) {
     await runPathTraversal({ ctx, target, base, engineConfig });
+  }
+
+  // ── File upload detection (form-based, uses SiteModel endpoints) ─────────────
+  if (uploadEnabled) {
+    await runFileUploadDetect({ ctx, target, base, siteModel, engineConfig });
   }
 
   ctx.log(`Active injection complete. Total probes sent: ${totalProbes}`);
@@ -162,7 +178,6 @@ async function runXssOnEndpoint({ ctx, target, urlBase, paramNames, engineConfig
         const res = await httpGetText({ fetchAdapter, url });
         probes++;
 
-        // Check for raw reflection — payload appears unencoded in response body.
         const bodySlice = res.body.slice(0, 65536);
         if (res.status >= 200 && res.status < 500 && bodySlice.includes(payload)) {
           const finding = new Finding({
@@ -268,6 +283,263 @@ async function runPathTraversal({ ctx, target, base, engineConfig }) {
   if (!hit) ctx.log('Path traversal: no hits detected.');
 }
 
+// ── Command Injection ─────────────────────────────────────────────────────────
+async function runCommandInjection({ ctx, target, urlBase, paramNames, engineConfig }) {
+  const { fetchAdapter } = engineConfig;
+  const mod = moduleDefById['injection.cmdi.basic'];
+  if (!mod) return 0;
+
+  const config   = mod.configSchema?.properties || {};
+  const payloads = config.payloads?.default || [];
+  const sigs     = config.signatures?.default || [];
+
+  let probes = 0;
+
+  for (const paramName of paramNames) {
+    let hitThisParam = false;
+
+    for (const payload of payloads) {
+      if (hitThisParam) break;
+      const url = injectQueryParam(urlBase, paramName, payload);
+      ctx.log(`CMDi probe [${paramName}]: ${url}`);
+
+      try {
+        const res = await httpGetText({ fetchAdapter, url });
+        probes++;
+
+        const bodySlice = res.body.slice(0, 8192);
+        if (res.status >= 200 && res.status < 500 && looksLikeCmdiHit(bodySlice, sigs)) {
+          const finding = new Finding({
+            projectId:   ctx.project.id,
+            scanJobId:   ctx.job.id,
+            targetId:    target.id,
+            moduleId:    'injection.cmdi.basic',
+            title:       'Possible OS Command Injection',
+            shortDescription: `Command injection payload in parameter "${paramName}" produced OS-level output at ${urlBase}.`,
+            detailedDescription:
+              'A response body containing OS command execution output (uid=, root:, or similar) was observed ' +
+              'after injecting OS command separator payloads into a query parameter. ' +
+              'This indicates a potential OS command injection vulnerability (RCE). ' +
+              'Validate manually — confirm output is not coincidental content from the application.',
+            severity:    'critical',
+            category:    'injection',
+            owaspTag:    'A03-Injection',
+            cweTag:      'CWE-78',
+          });
+          const evidence = new Evidence({
+            findingId:              finding.id,
+            url,
+            method:                 'GET',
+            responseStatus:        res.status,
+            responseHeadersSnippet: JSON.stringify(res.headers || {}).slice(0, 512),
+            responseBodySnippet:   bodySlice.slice(0, 2048),
+            matchedPattern:        `CMDi OS output signature (payload: ${payload})`,
+          });
+          ctx.addFinding(finding);
+          ctx.addEvidence(evidence);
+          ctx.log(`🔴 CRITICAL: OS command injection indicated — param="${paramName}" url=${url}`);
+          hitThisParam = true;
+        }
+      } catch (err) {
+        ctx.log(`CMDi probe error: ${err.message || err}`);
+        probes++;
+      }
+    }
+  }
+
+  return probes;
+}
+
+// ── SSTI ──────────────────────────────────────────────────────────────────────
+async function runSstiChecks({ ctx, target, urlBase, paramNames, engineConfig }) {
+  const { fetchAdapter } = engineConfig;
+  const mod = moduleDefById['injection.ssti.basic'];
+  if (!mod) return 0;
+
+  const config   = mod.configSchema?.properties || {};
+  const payloads = config.payloads?.default || [];
+  const errPats  = config.errorPatterns?.default || [];
+
+  let probes = 0;
+
+  for (const paramName of paramNames) {
+    let hitThisParam = false;
+
+    for (const { payload, expected } of payloads) {
+      if (hitThisParam) break;
+      const url = injectQueryParam(urlBase, paramName, payload);
+      ctx.log(`SSTI probe [${paramName}]: ${url}`);
+
+      try {
+        const res = await httpGetText({ fetchAdapter, url });
+        probes++;
+
+        const bodySlice = res.body.slice(0, 16384);
+        const mathHit   = expected && bodySlice.includes(expected);
+        const errorHit  = errPats.some((p) => bodySlice.toLowerCase().includes(p.toLowerCase()));
+
+        if (res.status >= 200 && res.status < 500 && (mathHit || errorHit)) {
+          const matchNote = mathHit
+            ? `Math result "${expected}" reflected (payload: ${payload})`
+            : `Template engine error string matched (payload: ${payload})`;
+
+          const finding = new Finding({
+            projectId:   ctx.project.id,
+            scanJobId:   ctx.job.id,
+            targetId:    target.id,
+            moduleId:    'injection.ssti.basic',
+            title:       'Possible Server-Side Template Injection (SSTI)',
+            shortDescription: `SSTI probe in parameter "${paramName}" produced template execution output at ${urlBase}.`,
+            detailedDescription:
+              'A template math expression or template engine error was detected in the response after injecting ' +
+              'template syntax payloads into a query parameter. ' +
+              'Server-side template injection can lead to remote code execution depending on the template engine. ' +
+              'Validate manually — confirm the numeric result or error is from template evaluation, not coincidence.',
+            severity:    'critical',
+            category:    'injection',
+            owaspTag:    'A03-Injection',
+            cweTag:      'CWE-94',
+          });
+          const evidence = new Evidence({
+            findingId:              finding.id,
+            url,
+            method:                 'GET',
+            responseStatus:        res.status,
+            responseHeadersSnippet: JSON.stringify(res.headers || {}).slice(0, 512),
+            responseBodySnippet:   bodySlice.slice(0, 2048),
+            matchedPattern:        matchNote,
+          });
+          ctx.addFinding(finding);
+          ctx.addEvidence(evidence);
+          ctx.log(`🔴 CRITICAL: SSTI indicated — param="${paramName}" url=${url}`);
+          hitThisParam = true;
+        }
+      } catch (err) {
+        ctx.log(`SSTI probe error: ${err.message || err}`);
+        probes++;
+      }
+    }
+  }
+
+  return probes;
+}
+
+// ── File Upload Detection ─────────────────────────────────────────────────────
+async function runFileUploadDetect({ ctx, target, base, siteModel, engineConfig }) {
+  const { fetchAdapter } = engineConfig;
+  const mod = moduleDefById['injection.fileupload.detect'];
+  if (!mod) return;
+
+  // Collect all endpoints that have file-type input fields from the SiteModel.
+  // siteModel.getUploadEndpoints() returns [{url, fieldName}] if available,
+  // otherwise fall back to heuristic path list.
+  const uploadEndpoints = typeof siteModel.getUploadEndpoints === 'function'
+    ? siteModel.getUploadEndpoints()
+    : [];
+
+  const config        = mod.configSchema?.properties || {};
+  const fallbackPaths = config.commonUploadPaths?.default || [];
+  const testExtensions = config.testExtensions?.default || [];
+  const dangerSigs    = config.dangerSignatures?.default || [];
+
+  // If crawler found no upload forms, probe common upload endpoint paths.
+  const targets = uploadEndpoints.length > 0
+    ? uploadEndpoints.map((ep) => ({ url: base.replace(/\/$/, '') + ep.url, fieldName: ep.fieldName || 'file' }))
+    : fallbackPaths.map((p) => ({ url: base.replace(/\/$/, '') + p, fieldName: 'file' }));
+
+  if (targets.length === 0) {
+    ctx.log('File upload detect: no upload endpoints or fallback paths to probe.');
+    return;
+  }
+
+  ctx.log(`File upload detect: probing ${targets.length} endpoint(s).`);
+
+  for (const { url, fieldName } of targets) {
+    // Step 1: confirm endpoint is reachable (GET probe)
+    let reachable = false;
+    try {
+      const res = await httpGetText({ fetchAdapter, url });
+      reachable = res.status >= 200 && res.status < 500;
+    } catch { /* unreachable */ }
+
+    if (!reachable) continue;
+
+    // Step 2: POST a benign .txt file via multipart/form-data
+    let benignAccepted = false;
+    const benignName   = `test-${Date.now()}.txt`;
+    const benignBody   = '--BOUNDARY\r\nContent-Disposition: form-data; name="' + fieldName + '"; filename="' + benignName + '"\r\nContent-Type: text/plain\r\n\r\ntest\r\n--BOUNDARY--';
+
+    try {
+      const res = await (engineConfig.fetchAdapter || fetch)(url, {
+        method:  'POST',
+        headers: { 'Content-Type': 'multipart/form-data; boundary=BOUNDARY' },
+        body:    benignBody,
+        signal:  AbortSignal.timeout(8000),
+      });
+      const body = typeof res.text === 'function' ? await res.text() : '';
+      benignAccepted = res.status >= 200 && res.status < 400 &&
+        (body.toLowerCase().includes(benignName) || body.toLowerCase().includes('success') ||
+         body.toLowerCase().includes('uploaded'));
+    } catch { /* ignore */ }
+
+    if (!benignAccepted) continue;
+    ctx.log(`File upload detect: benign upload accepted at ${url}`);
+
+    // Step 3: probe dangerous extension acceptance
+    for (const ext of testExtensions) {
+      const testName = `test-${Date.now()}${ext}`;
+      const testBody = '--BOUNDARY\r\nContent-Disposition: form-data; name="' + fieldName + '"; filename="' + testName + '"\r\nContent-Type: application/octet-stream\r\n\r\n<?php echo 1; ?>\r\n--BOUNDARY--';
+
+      try {
+        const res = await (engineConfig.fetchAdapter || fetch)(url, {
+          method:  'POST',
+          headers: { 'Content-Type': 'multipart/form-data; boundary=BOUNDARY' },
+          body:    testBody,
+          signal:  AbortSignal.timeout(8000),
+        });
+        const body = typeof res.text === 'function' ? await res.text() : '';
+        const bodyLow = body.toLowerCase();
+
+        // Hit: server accepted the dangerous extension (200-level, no rejection)
+        const rejected = dangerSigs.some((sig) => bodyLow.includes(sig.toLowerCase()));
+        const accepted = res.status >= 200 && res.status < 400 &&
+          (bodyLow.includes(testName) || bodyLow.includes('success') || bodyLow.includes('uploaded'));
+
+        if (accepted && !rejected) {
+          const finding = new Finding({
+            projectId:   ctx.project.id,
+            scanJobId:   ctx.job.id,
+            targetId:    target.id,
+            moduleId:    'injection.fileupload.detect',
+            title:       `Dangerous File Upload Accepted (${ext})`,
+            shortDescription: `Upload endpoint at ${url} accepted a file with extension ${ext} without apparent rejection.`,
+            detailedDescription:
+              `The upload endpoint accepted a test file with the extension "${ext}" without returning an error or rejection message. ` +
+              'If this extension is executable on the server (e.g., PHP, JSP, ASPX), an attacker may be able to upload a web shell and achieve remote code execution. ' +
+              'Validate manually — attempt to access the uploaded file and confirm execution is possible.',
+            severity:    'critical',
+            category:    'injection',
+            owaspTag:    'A03-Injection',
+            cweTag:      'CWE-434',
+          });
+          const evidence = new Evidence({
+            findingId:              finding.id,
+            url,
+            method:                 'POST',
+            responseStatus:        res.status,
+            responseHeadersSnippet: '',
+            responseBodySnippet:   body.slice(0, 2048),
+            matchedPattern:        `Extension ${ext} accepted without rejection`,
+          });
+          ctx.addFinding(finding);
+          ctx.addEvidence(evidence);
+          ctx.log(`🔴 CRITICAL: dangerous file extension accepted — ext=${ext} url=${url}`);
+        }
+      } catch { /* ignore */ }
+    }
+  }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function moduleEnabled(enabledModules, id) {
   return enabledModules.some((m) => m.id === id);
@@ -295,6 +567,11 @@ function looksLikeSqlError(body, patterns) {
 }
 
 function looksLikePathTraversalHit(body, sigs) {
+  const snippet = body.slice(0, 4096);
+  return sigs.some((sig) => snippet.includes(sig));
+}
+
+function looksLikeCmdiHit(body, sigs) {
   const snippet = body.slice(0, 4096);
   return sigs.some((sig) => snippet.includes(sig));
 }
