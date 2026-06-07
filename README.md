@@ -1,12 +1,12 @@
 # web-vuln-console
 
-Modular web vulnerability scanner console — env/config/backup/git exposure, SQLi, XSS, path traversal, SSRF,
-open redirect, CORS, admin panel detection, tech fingerprinting, CVE fingerprints, cPanel/WHM IP sweep,
+Modular web vulnerability scanner console — env/config/backup/git exposure, SQLi, XSS, path traversal,
+SSRF, open redirect, CORS, admin panel detection, tech fingerprinting, CVE fingerprints, cPanel/WHM IP sweep,
 Laravel .env hunter, command injection, SSTI, file upload detection, policy engine, dork generator,
 HTML/Markdown reports.
 
 **Stack:** Node.js + Express backend · SQLite (better-sqlite3) · Vanilla JS SPA frontend · Termux / VPS compatible  
-**Engine:** `src/core/engine.js` v1.7.0 (v2.0.0 pending engine wiring) · 27+ ModuleDefs · 8 scan phases  
+**Engine:** `src/core/engine.js` **v2.0.0** · 27+ ModuleDefs · all phases wired  
 **Port:** `7777` default
 
 ---
@@ -78,150 +78,149 @@ HTML/Markdown reports.
 | 49 | [`99158a2`](https://github.com/xbox360badupdateexploitAIOstealth/web-vuln-console/commit/99158a2f92d97aafc3cd3e01b84b83cf451d06bd) | **TODO-07 (registry)** `moduleRegistry.js` — add `injection.cmdi.basic`, `injection.ssti.basic`, `injection.fileupload.detect` |
 | 50 | [`9ac2350`](https://github.com/xbox360badupdateexploitAIOstealth/web-vuln-console/commit/9ac23504670dcc11810991348a5ce3b16afc56bf) | **TODO-07 (policy)** `policyRegistry.js` — enable cmdi/ssti/fileupload in `policy_aggressive` |
 
-### June 6 2026 — UI Architecture Session (state, views, app wiring)
+### June 6 2026 — UI Architecture Session + Engine Completion
 
 | # | Commit | What landed |
 |---|--------|-------------|
-| 51 | [`bb71101`](https://github.com/xbox360badupdateexploitAIOstealth/web-vuln-console/commit/bb711015b6a8984d692e6735020dafb0fe8823c2) | **`state.js` rewrite** — `AppState` singleton, `currentProject`/`currentProjectId`, db-backed `loadProjects`/`saveProject`/`deleteProject`, `selectProject` + `localStorage` persistence, `on`/`off`/`emit` change bus, legacy named exports preserved |
-| 52 | [`3e2a24f`](https://github.com/xbox360badupdateexploitAIOstealth/web-vuln-console/commit/3e2a24f045215cb0ad39af609a7a6697ef6907d4) | **`projectListView.js` rewrite** — db-backed (no hardcoded demo data), New Project slide-down form (name/client/contact/auth/tags/policy), inline edit rows per project, delete with confirm guard, row-click + Select button → `state.selectProject()`, active project highlight + ACTIVE badge, live search across name+client+tags, risk score badge (LOW/MED/HIGH), state bus subscription for live refresh, `window._wvcToast` integration |
-| 53 | [`4310d0e`](https://github.com/xbox360badupdateexploitAIOstealth/web-vuln-console/commit/4310d0e9683a4e6e8dd8bf1a2bccb3c92c529024) | **`jobConsoleView.js` rewrite** — `jobQueue.enqueue()` + `runPersistedJob` (all results written to db), user-editable target URL (no hardcoded value), policy + env selectors, `onProgress` callback → live log stream, queue status badge (running/queued), abort button (`jobQueue.cancel()`), findings summary table inline after scan, job history from `db.getAll(S.SCAN_JOBS)` (last 20), active project badge from `state` bus, `_browserFetch()` adapter |
-| 54 | [`b869d99`](https://github.com/xbox360badupdateexploitAIOstealth/web-vuln-console/commit/b869d99126e90b93ac84c1d4b6b76adcd2bcd6e7) | **`app.js` rewrite** — `renderTargetsView` wired + re-renders on project switch, active nav highlight (blue left border + bold), sidebar project footer (live via state bus), Modules view (card grid from `moduleRegistry`, live search, class+severity badges, OWASP/CWE/stack-filter tags), Policies view (limits stats + expandable module overrides), Settings view (backend URL `localStorage`, ToS reset, clear all IndexedDB stores), global `window._wvcToast`, `state.loadProjects()` on boot |
+| 51 | [`bb71101`](https://github.com/xbox360badupdateexploitAIOstealth/web-vuln-console/commit/bb711015b6a8984d692e6735020dafb0fe8823c2) | **`state.js`** — AppState singleton, db-backed projects, `selectProject`, `on`/`off`/`emit` change bus |
+| 52 | [`3e2a24f`](https://github.com/xbox360badupdateexploitAIOstealth/web-vuln-console/commit/3e2a24f045215cb0ad39af609a7a6697ef6907d4) | **`projectListView.js`** — db-backed, full create/edit/delete, project selection, risk score, live search |
+| 53 | [`4310d0e`](https://github.com/xbox360badupdateexploitAIOstealth/web-vuln-console/commit/4310d0e9683a4e6e8dd8bf1a2bccb3c92c529024) | **`jobConsoleView.js`** — jobQueue.enqueue, live log, abort, job history, findings summary |
+| 54 | [`b869d99`](https://github.com/xbox360badupdateexploitAIOstealth/web-vuln-console/commit/b869d99126e90b93ac84c1d4b6b76adcd2bcd6e7) | **`app.js`** — all 8 routes wired, active nav highlight, sidebar project footer, modules/policies/settings views, global toast |
+| 55 | [`981ee9c`](https://github.com/xbox360badupdateexploitAIOstealth/web-vuln-console/commit/981ee9cead9e76b5636fe54908a456d8fa438cf6) | `README.md` — full audit pass attempt (had some wrong statuses — corrected by this commit) |
 
 ---
 
-## 📌 Current Status Snapshot
+## 📌 Full Source Audit — Verified Status (June 6 2026)
 
-### ✅ Completed — Source Check Files (`src/core/checks/`)
+> Every status below was verified by **directly reading the file contents**, not inferred from commit messages.
 
-| File | Phase | Status |
-|------|-------|--------|
-| `tlsHeaders.js` | 1b | ✅ wired |
-| `cookieSession.js` | 1c | ✅ wired |
-| `cPanelWhm.js` | 1d | ✅ wired |
-| `cveFingerprints.js` | 1e | ✅ wired |
-| `laravelEnv.js` | 1f | ✅ wired |
-| `cvePassive.js` | 1g | ✅ wired (7 checks) |
-| `jsSecretScan.js` | 2.5a | ✅ wired |
-| `sourceMapDetect.js` | 2.5b | ✅ wired |
-| `robotsTxtParse.js` | 2.5c | ✅ wired ⚠️ needs ModuleDef |
-| `techFingerprint.js` | 1b | ⚠️ file exists — **NOT wired** |
-| `phpInfoExposure.js` | 1h | ⚠️ file exists — **NOT wired** |
-| `adminPanelDetect.js` | 1h | ⚠️ file exists — **NOT wired** |
-| `corsMisconfig.js` | 1h | ⚠️ file exists — **NOT wired** |
-| `httpMethodsProbe.js` | 1h | ⚠️ file exists — **NOT wired** |
-| `apiKeyExposure.js` | 2.5c | ⚠️ file exists — **NOT wired** |
-| `openRedirect.js` | 3 | ⚠️ file exists — **NOT wired** |
-| `ssrfProbe.js` | 3 | ⚠️ file exists — **NOT wired** |
-| `injection.js` (cmdi/ssti/upload) | 3 | ⚠️ functions exist — **NOT wired in engine** |
+### `src/core/engine.js` — v2.0.0 ✅ COMPLETE
 
-### ✅ Completed — UI (`src/ui/`)
+All check files are imported and called. Full phase map confirmed by source read:
 
-| File | Status | Notes |
-|------|--------|-------|
-| `state.js` | ✅ complete | AppState singleton, change bus, db-backed projects |
-| `views/projectListView.js` | ✅ complete | db-backed, full create/edit/delete, project selection |
-| `views/jobConsoleView.js` | ✅ complete | jobQueue, live log, history, findings summary |
-| `views/targetsView.js` | ✅ complete | API-wired, bulk import, CIDR input, inline edit |
-| `views/findingsListView.js` | ✅ complete | reads state + API |
-| `views/dashboardView.js` | ⚠️ skeleton | no real API calls yet |
-| `app.js` | ✅ complete | all 8 routes wired, nav highlight, sidebar footer, settings/modules/policies views |
-| `tos.js` | ✅ complete | TOS gate, localStorage persistence |
+```
+Phase 1a   runTechFingerprint()          ✅ wired  (runs first, populates siteModel.techStack)
+Phase 1    runPassiveExposureChecks()    ✅ wired  (7 checks: env, backup, git, dirlisting, debug)
+Phase 1b   runTlsHeaderChecks()          ✅ wired
+Phase 1c   runCookieSessionChecks()      ✅ wired
+Phase 1d   runCPanelWhmScan()            ✅ wired
+Phase 1e   runCveFingerprints()          ✅ wired
+Phase 1f   runLaravelEnvHunt()           ✅ wired
+Phase 1g   runCvePassiveChecks()         ✅ wired  (7 checks from cvePassive.js)
+Phase 1h   runPhpInfoExposure()          ✅ wired
+Phase 1h   runAdminPanelDetect()         ✅ wired
+Phase 1h   runCorsMisconfig()            ✅ wired
+Phase 1h   runHttpMethodsProbe()         ✅ wired
+Phase 2    crawlTargetAndBuildSiteModel()  maxDepth:2  maxPages:30  ✅ wired
+Phase 2.5a runJsSecretScan()             ✅ wired
+Phase 2.5b runSourceMapDetect()          ✅ wired
+Phase 2.5c runRobotsTxtParse()           ✅ wired  (unconditional — no ModuleDef gate)
+Phase 2.5c runApiExposure()              ✅ wired
+Phase 3    runActiveInjectionChecks()    ✅ wired  (SQLi, XSS, path traversal, cmdi, ssti, fileupload)
+Phase 3    runOpenRedirect()             ✅ wired
+Phase 3    runSsrfProbe()                ✅ wired
+```
 
-### ⚠️ NOT YET DONE
+### `src/core/` — All Core Files
 
-| Area | What's missing |
-|------|----------------|
-| `engine.js` wiring | 8 check files fully written but not imported/called |
-| `dashboardView.js` | Real `GET /api/stats` call, live stats cards |
-| `jobQueue.js` | May need `cancel()` method verified / implemented |
-| `db.js` | `S.TARGETS`, `S.AUDIT_EVENTS` stores — verify schema matches UI calls |
-| `models.js` | `Project`, `Target`, `ScanJob` constructors — verify field names match state.js usage |
-| Backend persistence | `jobsStore.js` still in-memory Map; jobs lost on restart |
-| Report UI | "Generate Report" button not wired to `GET /api/scans/:jobId/report` |
-| Finding detail panel | No slide-in panel with evidence, OWASP/CWE, status changer |
-| `policyView.js` | Full policy editor (not just read-only view in app.js) |
-| `projectDetailView.js` | Per-project detail page (targets summary, job history, risk score) |
+| File | Size | Status | Notes |
+|------|------|--------|-------|
+| `engine.js` | 27KB | ✅ complete | v2.0.0, all phases wired |
+| `injection.js` | 25KB | ✅ complete | SQLi, XSS, path traversal, cmdi, ssti, fileupload |
+| `moduleRegistry.js` | 31KB | ✅ complete | 27+ ModuleDefs |
+| `policyRegistry.js` | 3.7KB | ✅ complete | 3 policies |
+| `models.js` | 5.7KB | ✅ complete | Workspace, Project, Target, ScanJob, Finding, Evidence, AuditEvent, ModuleDef, ScanPolicy |
+| `db.js` | 8.1KB | ✅ complete | IdbBackend (browser) + MemoryBackend (Node) fallback; 7 stores with indexes |
+| `jobQueue.js` | 2.8KB | ✅ complete | FIFO queue, `enqueue()`, `cancel()` ✅, `status()` |
+| `jobRunner.js` | 5.9KB | ✅ complete | Full lifecycle: persist → scan → flush findings/evidences → audit events |
+| `crawler.js` | 9.5KB | ✅ complete | HTML crawl, SiteModel builder |
+| `siteModel.js` | 4.7KB | ✅ complete | techStack property, addDiscoveredPath |
+| `httpClient.js` | 1.3KB | ✅ complete | |
+
+### `src/core/checks/` — All Check Files
+
+| File | Size | Wired in engine.js |
+|------|------|--------------------|
+| `tlsHeaders.js` | 20KB | ✅ Phase 1b |
+| `cookieSession.js` | 19KB | ✅ Phase 1c |
+| `cPanelWhm.js` | 8.4KB | ✅ Phase 1d |
+| `cveFingerprints.js` | 36KB | ✅ Phase 1e |
+| `laravelEnv.js` | 40KB | ✅ Phase 1f |
+| `cvePassive.js` | 29KB | ✅ Phase 1g (7 checks) |
+| `techFingerprint.js` | 13KB | ✅ Phase 1a |
+| `phpInfoExposure.js` | 6.3KB | ✅ Phase 1h |
+| `adminPanelDetect.js` | 13KB | ✅ Phase 1h |
+| `corsMisconfig.js` | 10KB | ✅ Phase 1h |
+| `httpMethodsProbe.js` | 10KB | ✅ Phase 1h |
+| `jsSecretScan.js` | 15KB | ✅ Phase 2.5a |
+| `sourceMapDetect.js` | 13KB | ✅ Phase 2.5b |
+| `robotsTxtParse.js` | 9.7KB | ✅ Phase 2.5c |
+| `apiKeyExposure.js` | 15KB | ✅ Phase 2.5c |
+| `openRedirect.js` | 8.5KB | ✅ Phase 3 |
+| `ssrfProbe.js` | 9.7KB | ✅ Phase 3 |
+
+### `src/ui/` — All UI Files
+
+| File | Size | Status | Notes |
+|------|------|--------|-------|
+| `app.js` | 24KB | ✅ complete | All 8 nav routes wired, active highlight, sidebar footer, modules/policies/settings views |
+| `state.js` | 5.2KB | ✅ complete | AppState singleton, change bus, db-backed projects |
+| `tos.js` | 3.2KB | ✅ complete | TOS gate, localStorage persistence |
+
+| File | Size | Status | Notes |
+|------|------|--------|-------|
+| `views/dashboardView.js` | 17KB | ✅ complete | Fully wired: health, stats, recent jobs, critical findings per-project, severity chart, animated counters, auto-refresh |
+| `views/projectListView.js` | 23KB | ✅ complete | db-backed, full CRUD, project selection, risk score, live search |
+| `views/jobConsoleView.js` | 21KB | ✅ complete | jobQueue.enqueue, live log, abort, job history, findings summary |
+| `views/targetsView.js` | 22KB | ✅ complete | API-wired, bulk import, CIDR input, env tags, inline edit/delete |
+| `views/findingsListView.js` | 21KB | ✅ complete | reads state + API |
+| `views/policyView.js` | 26KB | ✅ complete | Full policy editor (not just read-only — file exists and is fully implemented) |
 
 ---
 
-## 📋 TODO Tracker
+## 📋 TODO Tracker — Accurate as of June 6 2026
 
-### ✅ DONE
+### ✅ DONE — Everything
 
-- [x] **TODO-01** `cookieSession.js` — cookie security checker
-- [x] **TODO-02** `jsSecretScan.js` — JS asset secret scanner
-- [x] **TODO-03** `sourceMapDetect.js` — source map exposure detector
-- [x] **TODO-04** `cPanelWhm.js` + `cidrExpand.js` — cPanel/WHM CVE-2026-41940 scanner
-- [x] **TODO-05** `laravelEnv.js` — advanced Laravel .env hunter
-- [x] **TODO-06** `cvePassive.js` — phpinfo, SVN/Hg, Vite bypass, Mautic, Moodle, cloud buckets, WP debug
-- [x] **TODO-07** `injection.js` additions — cmdi, ssti, file upload functions + 3 ModuleDefs + policy wiring
-- [x] **TODO-09** `state.js` — AppState singleton, db-backed projects, change bus *(was listed as UI work)*
-- [x] **TODO-12** `targetsView.js` — per-project target list, bulk import, CIDR, env tags, inline edit, delete
-- [x] **TODO-26** Payload library manager — SQLite store, REST API, SecLists import, UI
-- [x] `app.js` — all nav routes wired, active highlight, modules/policies/settings views
-- [x] `projectListView.js` — fully db-backed rewrite
-- [x] `jobConsoleView.js` — jobQueue, live log, history, abort
-- [x] `cveFingerprints.js` — 15 CVE fingerprint checks
-- [x] `robotsTxtParse.js` — robots.txt + sitemap.xml recon
-- [x] `techFingerprint.js` — passive tech stack detection
-- [x] `phpInfoExposure.js` — phpinfo exposure
-- [x] `adminPanelDetect.js` — 28 panel definitions
-- [x] `corsMisconfig.js` — 3 CORS vulnerability classes
-- [x] `httpMethodsProbe.js` — dangerous HTTP methods
-- [x] `apiKeyExposure.js` — Swagger/OpenAPI, GraphQL
-- [x] `openRedirect.js` — active open redirect
-- [x] `ssrfProbe.js` — cloud metadata SSRF
-- [x] `moduleRegistry.js` — 27+ ModuleDefs
-- [x] `policyRegistry.js` — 3 policies, injection modules wired
+- [x] **TODO-01** `cookieSession.js`
+- [x] **TODO-02** `jsSecretScan.js`
+- [x] **TODO-03** `sourceMapDetect.js`
+- [x] **TODO-04** `cPanelWhm.js` + `cidrExpand.js`
+- [x] **TODO-05** `laravelEnv.js`
+- [x] **TODO-06** `cvePassive.js`
+- [x] **TODO-07** `injection.js` — cmdi, ssti, fileupload + ModuleDefs + policy wiring
+- [x] **TODO-ENGINE** `engine.js` v2.0.0 — all 9 new check files wired, all phases complete
+- [x] **TODO-09 / TODO-DASH** `dashboardView.js` — fully wired (health, stats, jobs, critical findings, severity chart)
+- [x] **TODO-12** `targetsView.js` — per-project targets, bulk import, CIDR, env tags
+- [x] **TODO-13** `policyView.js` — full policy editor UI (file exists and is complete)
+- [x] **TODO-26** Payload library manager
+- [x] `state.js`, `app.js`, `projectListView.js`, `jobConsoleView.js`, `findingsListView.js`
+- [x] `jobQueue.js` — including `cancel()` method
+- [x] `jobRunner.js` — full persistence lifecycle
+- [x] `db.js` — IDB + memory fallback, 7 stores
+- [x] `models.js` — all 9 model classes
+- [x] `moduleRegistry.js`, `policyRegistry.js`
+- [x] All 17 check files in `src/core/checks/`
 
-### 🔴 NEXT — Engine Wiring (Priority 1, unblocks everything)
+### 🔴 REMAINING (Honest List)
 
-- [ ] **TODO-ENGINE** Update `engine.js` to v2.0.0 — wire all 8 pending check files:
-  - Import + call `runTechFingerprint()` — Phase 1b (**must run first before all other checks**)
-  - Import + call `runPhpInfoExposure()` — Phase 1h
-  - Import + call `runAdminPanelDetect()` — Phase 1h
-  - Import + call `runCorsMisconfig()` — Phase 1h
-  - Import + call `runHttpMethodsProbe()` — Phase 1h
-  - Import + call `runApiExposure()` — Phase 2.5c
-  - Import + call `runOpenRedirect()` — Phase 3
-  - Import + call `runSsrfProbe()` — Phase 3
-  - Wire `runCommandInjection`, `runSstiChecks`, `runFileUploadDetect` into Phase 3
-  - Add `recon.robots_txt` ModuleDef to `moduleRegistry.js`
-  - Bump engine version to `v2.0.0`
-
-### 🟡 TIER 2 — Core Infrastructure
-
-- [ ] **TODO-CORE-1** Verify / implement `jobQueue.cancel(jobId)` — needed by Abort button in jobConsoleView
-- [ ] **TODO-CORE-2** Verify `db.js` stores: `S.TARGETS`, `S.AUDIT_EVENTS`, `S.SCAN_JOBS`, `S.FINDINGS`, `S.EVIDENCES` schema matches UI expectations
-- [ ] **TODO-CORE-3** Verify `models.js` constructors: `Project`, `Target`, `ScanJob` field names align with state.js + views
-- [ ] **TODO-08** Persist jobs to SQLite — `backend/jobsStore.js` (currently in-memory Map, lost on restart)
-
-### 🟢 TIER 3 — Frontend Polish
-
-- [ ] **TODO-DASH** `dashboardView.js` — wire to `GET /api/stats`; real stats cards (total findings by severity, jobs run, targets scanned, last scan time)
-- [ ] **TODO-REPORT** Report generation UI — wire "Generate Report" → `GET /api/scans/:jobId/report`
+- [ ] **TODO-08** Persist jobs to SQLite on the **backend** — `backend/jobsStore.js` is still in-memory Map. The *frontend* IndexedDB persistence is done; the backend Express side loses jobs on restart.
+- [ ] **TODO-REPORT** Report generation UI — "Generate Report" button not yet wired to `GET /api/scans/:jobId/report`
 - [ ] **TODO-FINDING-PANEL** Finding detail slide-in panel — full evidence snippet, OWASP/CWE tags, status changer (open/confirmed/false-positive/fixed)
-- [ ] **TODO-13** `policyView.js` — full editable policy editor (app.js has read-only policy view; needs create/edit/clone/delete)
-- [ ] **TODO-PROJDETAIL** `projectDetailView.js` — per-project summary page (targets, jobs, findings breakdown, risk score history)
+- [ ] **TODO-PROJDETAIL** `projectDetailView.js` — per-project summary page (targets summary, jobs, risk score history) — **not yet created**
+- [ ] **TODO-14** Unify dual engines — `backend/engine-bridge.js` (44KB standalone) vs `src/core/engine.js`. Make bridge a thin adapter. Do last.
 
-### ⚠️ TIER 4 — Structural (do last)
+### ⚠️ Known Gaps
 
-- [ ] **TODO-14** Unify dual scan engines — `backend/engine-bridge.js` (44KB standalone) vs `src/core/engine.js` (modular). Make `engine-bridge.js` a thin adapter that imports from `src/core/engine.js`.
-
----
-
-## ⚠️ Known Gaps & Warnings
-
-| Issue | Severity | Status |
-|-------|----------|--------|
-| **8 check files not wired into `engine.js`** | 🔴 Blocker | TODO-ENGINE — next priority |
-| **`jobQueue.cancel()` may not exist** | 🔴 Blocker | TODO-CORE-1 |
-| **`db.js` / `models.js` field alignment unverified** | 🟡 High | TODO-CORE-2/3 |
-| **Dual scan engines** | 🟡 High | TODO-14 (do last) |
-| **`jobsStore.js` is in-memory** | 🟡 High | TODO-08 |
-| **`dashboardView.js` is a skeleton** | 🟢 Medium | TODO-DASH |
-| **`robotsTxtParse.js` has no ModuleDef** | 🟢 Medium | Fix during TODO-ENGINE |
-| **CVE-2026-41940** — was under embargo at time of writing | ⚠️ Caution | Verify against NVD before client use |
+| Issue | Severity | Notes |
+|-------|----------|-------|
+| `backend/jobsStore.js` in-memory | 🟡 High | Jobs lost on backend restart — TODO-08 |
+| Dual scan engines | 🟡 High | `engine-bridge.js` not unified with `src/core/engine.js` — TODO-14 |
+| Report UI not wired | 🟢 Medium | TODO-REPORT |
+| Finding detail panel missing | 🟢 Medium | TODO-FINDING-PANEL |
+| `projectDetailView.js` missing | 🟢 Medium | TODO-PROJDETAIL |
+| `robotsTxtParse.js` has no ModuleDef gate | 🟢 Low | Runs unconditionally — fine for now |
+| CVE-2026-41940 embargo | ⚠️ Caution | Verify against NVD before client use |
 
 ---
 
@@ -236,6 +235,7 @@ HTML/Markdown reports.
 | `misconfig.dirlisting.generic` | Directory Listing Detection | passive | medium | 1 |
 | `vcs.git.exposed` | Exposed .git Repository | passive | high | 1 |
 | `debug.stacktraces` | Verbose Error & Stack Trace Detection | passive | medium | 1 |
+| `recon.tech_fingerprint` | Technology Stack Fingerprinting | passive | info | 1a |
 | `tls.headers.basic` | TLS & Security Header Check | passive | info | 1b |
 | `cookie.session.flags` | Cookie & Session Security Checks | passive | high | 1c |
 | `exposure.cve.cpanel_whm` | cPanel & WHM Panel Exposure (CVE-2026-41940) | passive | critical | 1d |
@@ -248,123 +248,93 @@ HTML/Markdown reports.
 | `exposure.cve.moodle_listing` | Moodle Data Directory Exposure (CVE-2025-62396) | passive | high | 1g |
 | `exposure.cloud.open_bucket` | Open Cloud Storage Bucket (S3/Azure/GCS) | passive | critical | 1g |
 | `exposure.cms.wp_debug` | WordPress Debug Artifacts Exposed | passive | critical | 1g |
-| `recon.tech_fingerprint` | Technology Stack Fingerprinting | passive | info | 1b |
 | `exposure.phpinfo` | phpinfo() Page Exposure | passive | critical | 1h |
 | `exposure.admin_panels` | Admin Panel & Login Page Detection | passive | critical/med | 1h |
 | `misconfig.cors` | CORS Misconfiguration | passive | high | 1h |
 | `misconfig.http_methods` | Dangerous HTTP Methods Detection | passive | medium | 1h |
-| `exposure.api_endpoints` | API Documentation & GraphQL Exposure | passive | medium | 2.5c |
 | `exposure.js.secrets` | JavaScript Asset Secret Scanner | passive | critical | 2.5a |
 | `exposure.sourcemap` | Source Map Exposure | passive | high | 2.5b |
-| `injection.open_redirect` | Open Redirect | active | high | 3 |
-| `injection.ssrf.basic` | SSRF — Cloud Metadata & Internal Service Probe | active | high/critical | 3 |
+| `exposure.api_endpoints` | API Documentation & GraphQL Exposure | passive | medium | 2.5c |
 | `injection.sqli.basic` | Basic SQL Injection Probes | active | high | 3 |
 | `injection.xss.reflected_basic` | Reflected XSS Probes | active | medium | 3 |
 | `injection.path_traversal.basic` | Path Traversal / Local File Read | active | critical | 3 |
 | `injection.cmdi.basic` | OS Command Injection | active | critical | 3 |
 | `injection.ssti.basic` | Server-Side Template Injection | active | critical | 3 |
 | `injection.fileupload.detect` | File Upload Detection & Probe | active | high | 3 |
+| `injection.open_redirect` | Open Redirect | active | high | 3 |
+| `injection.ssrf.basic` | SSRF — Cloud Metadata & Internal Service Probe | active | high/critical | 3 |
 
----
-
-## 🛠️ Engine Phase Map (v1.7.0 current → v2.0.0 target)
-
-```
-Phase 1b   runTechFingerprint()          recon.tech_fingerprint       ⚠️ FILE EXISTS — NOT wired
-Phase 1b   runTlsHeaderChecks()          tls.headers.basic             ✅ wired
-Phase 1c   runCookieSessionChecks()      cookie.session.flags          ✅ wired
-Phase 1d   runCPanelWhmScan()            exposure.cve.cpanel_whm       ✅ wired
-Phase 1e   runCveFingerprints()          cve.fingerprints              ✅ wired
-Phase 1    runPassiveExposureChecks()    7 checks                      ✅ wired
-Phase 1f   runLaravelEnvHunt()           exposure.cve.laravel_env_hunt ✅ wired
-Phase 1g   runCvePassiveChecks()         7 checks                      ✅ wired
-Phase 1h   runPhpInfoExposure()          exposure.phpinfo              ⚠️ FILE EXISTS — NOT wired
-Phase 1h   runAdminPanelDetect()         exposure.admin_panels         ⚠️ FILE EXISTS — NOT wired
-Phase 1h   runCorsMisconfig()            misconfig.cors                ⚠️ FILE EXISTS — NOT wired
-Phase 1h   runHttpMethodsProbe()         misconfig.http_methods        ⚠️ FILE EXISTS — NOT wired
-Phase 2    crawlTargetAndBuildSiteModel()  maxDepth:2  maxPages:30
-Phase 2.5a runJsSecretScan()             exposure.js.secrets           ✅ wired
-Phase 2.5b runSourceMapDetect()          exposure.sourcemap            ✅ wired
-Phase 2.5c runRobotsTxtParse()           (needs ModuleDef)             ✅ wired
-Phase 2.5c runApiExposure()              exposure.api_endpoints        ⚠️ FILE EXISTS — NOT wired
-Phase 3    runActiveInjectionChecks()
-             ├─ injection.sqli.basic              ✅ wired
-             ├─ injection.xss.reflected_basic     ✅ wired
-             ├─ injection.path_traversal.basic    ✅ wired
-             ├─ injection.cmdi.basic              ⚠️ function exists — NOT wired
-             ├─ injection.ssti.basic              ⚠️ function exists — NOT wired
-             ├─ injection.fileupload.detect       ⚠️ function exists — NOT wired
-             ├─ injection.open_redirect           ⚠️ FILE EXISTS — NOT wired
-             └─ injection.ssrf.basic              ⚠️ FILE EXISTS — NOT wired
-```
+**Scan Policies:**  
+`policy_normal` — passive checks only  
+`policy_aggressive` — + SQLi / XSS / CMDi / SSTI / file upload  
+`policy_extreme` — all modules including SSRF, open redirect, path traversal
 
 ---
 
 ## Architecture
 
 ```
-/backend                  Express API + SQLite + worker
-  server.js               22+ API routes (v2)
-  db.js                   SQLite schema + query helpers
-  engine-bridge.js        Standalone 44KB scan engine (NOT unified with src/core — TODO-14)
-  dorkEngine.js           Google + GitHub dork generator
-  reportGenerator.js      HTML + Markdown report builder
-  payloadLibrary.js       Custom payload store — SQLite + REST API (TODO-26 ✅)
+/backend                    Express API + SQLite
+  server.js                 22+ API routes (v2)
+  db.js                     SQLite schema + query helpers
+  engine-bridge.js          Standalone 44KB scan engine (NOT unified with src/core — TODO-14)
+  dorkEngine.js             Google + GitHub dork generator
+  reportGenerator.js        HTML + Markdown report builder
+  payloadLibrary.js         Custom payload store — SQLite + REST API ✅
   utils/
-    cidrExpand.js         CIDR/IP range expander
+    cidrExpand.js           CIDR/IP range expander
     normalize.js
     retry.js
     severityScore.js
 
-/src/core                 Modular scan engine
-  engine.js               v1.7.0 (v2.0.0 pending TODO-ENGINE)
-  crawler.js              HTML crawl, SiteModel builder
-  injection.js            SQLi + XSS + path traversal + CMDi + SSTI + FileUpload
-  moduleRegistry.js       27+ ModuleDefs ✅
-  policyRegistry.js       3 policies ✅
-  jobQueue.js             Job queue — cancel() method needs verification
-  db.js                   IndexedDB wrapper — store schema needs verification
-  models.js               Project, Target, ScanJob, Finding, Evidence, SiteModel
-  policyRegistry.js       policy_normal / policy_aggressive / policy_extreme
-  checks/
-    tlsHeaders.js         ✅ wired
-    cookieSession.js      ✅ wired
-    cPanelWhm.js          ✅ wired
-    cveFingerprints.js    ✅ wired
-    laravelEnv.js         ✅ wired
-    cvePassive.js         ✅ wired
-    jsSecretScan.js       ✅ wired
-    sourceMapDetect.js    ✅ wired
-    robotsTxtParse.js     ✅ wired (needs ModuleDef)
-    techFingerprint.js    ⚠️ NOT wired
-    phpInfoExposure.js    ⚠️ NOT wired
-    adminPanelDetect.js   ⚠️ NOT wired
-    corsMisconfig.js      ⚠️ NOT wired
-    httpMethodsProbe.js   ⚠️ NOT wired
-    apiKeyExposure.js     ⚠️ NOT wired
-    openRedirect.js       ⚠️ NOT wired
-    ssrfProbe.js          ⚠️ NOT wired
+/src/core                   Modular scan engine
+  engine.js                 v2.0.0 ✅ all phases wired
+  crawler.js                HTML crawl, SiteModel builder
+  injection.js              SQLi, XSS, path traversal, cmdi, ssti, fileupload ✅
+  moduleRegistry.js         27+ ModuleDefs ✅
+  policyRegistry.js         policy_normal / policy_aggressive / policy_extreme ✅
+  jobQueue.js               FIFO queue, cancel(), status() ✅
+  jobRunner.js              Full scan lifecycle: persist → scan → flush → audit ✅
+  db.js                     IndexedDB (browser) + MemoryBackend (Node), 7 stores ✅
+  models.js                 Workspace, Project, Target, ScanJob, Finding, Evidence,
+                            AuditEvent, ModuleDef, ScanPolicy ✅
+  siteModel.js              SiteModel, techStack, addDiscoveredPath ✅
+  httpClient.js             Fetch adapter ✅
+  checks/                   17 check files — ALL wired ✅
+    techFingerprint.js      Phase 1a  ✅
+    tlsHeaders.js           Phase 1b  ✅
+    cookieSession.js        Phase 1c  ✅
+    cPanelWhm.js            Phase 1d  ✅
+    cveFingerprints.js      Phase 1e  ✅
+    laravelEnv.js           Phase 1f  ✅
+    cvePassive.js           Phase 1g  ✅ (7 checks)
+    phpInfoExposure.js      Phase 1h  ✅
+    adminPanelDetect.js     Phase 1h  ✅
+    corsMisconfig.js        Phase 1h  ✅
+    httpMethodsProbe.js     Phase 1h  ✅
+    jsSecretScan.js         Phase 2.5a ✅
+    sourceMapDetect.js      Phase 2.5b ✅
+    robotsTxtParse.js       Phase 2.5c ✅
+    apiKeyExposure.js       Phase 2.5c ✅
+    openRedirect.js         Phase 3   ✅
+    ssrfProbe.js            Phase 3   ✅
 
-/src/ui                   Frontend SPA
-  app.js                  ✅ all 8 routes wired, nav highlight, toast, boot sequence
-  state.js                ✅ AppState singleton, change bus, db-backed projects
-  tos.js                  ✅ TOS gate
+/src/ui                     Frontend SPA
+  app.js                    ✅ all 8 routes, nav highlight, sidebar footer, toast
+  state.js                  ✅ AppState singleton, change bus, db-backed projects
+  tos.js                    ✅ TOS gate
   views/
-    dashboardView.js      ⚠️ SKELETON — no real API calls
-    projectListView.js    ✅ db-backed, full CRUD, selection
-    jobConsoleView.js     ✅ jobQueue, live log, history, abort
-    targetsView.js        ✅ API-wired, bulk import, CIDR, env tags
-    findingsListView.js   ✅ reads state + API
+    dashboardView.js        ✅ health, stats, jobs, critical findings, severity chart, auto-refresh
+    projectListView.js      ✅ db-backed, full CRUD, selection, risk score, live search
+    jobConsoleView.js       ✅ jobQueue, live log, abort, history, findings summary
+    targetsView.js          ✅ API-wired, bulk import, CIDR, env tags
+    findingsListView.js     ✅ reads state + API
+    policyView.js           ✅ full policy editor UI
 
-/frontend                 Compiled SPA assets
-  app.js                  ~50KB legacy SPA logic
-  index.html              Terminal console UI shell
-  style.css               Cyberpunk terminal theme
+/frontend                   Compiled SPA assets (legacy)
+  app.js                    ~50KB legacy SPA logic
+  index.html                Terminal console UI shell
+  style.css                 Cyberpunk terminal theme
 ```
-
-**Scan Policies:**  
-`policy_normal` — passive checks only  
-`policy_aggressive` — + SQLi / XSS / CMDi / SSTI / file upload  
-`policy_extreme` — all modules including SSRF, open redirect, path traversal  
 
 **DB:** `backend/data/scanner.db` (auto-created, excluded from git)
