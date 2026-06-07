@@ -1,193 +1,388 @@
 // src/ui/views/dashboardView.js
-// TODO-09: Wired to GET /api/stats — real stats, severity breakdown,
-//          recent jobs, and recent critical findings.
+// TODO-09 v2: Fully wired dashboard
+//   - GET /api/health   → health status card (online / degraded / offline)
+//   - GET /api/stats    → 4 stat cards (projects / targets / jobs / findings)
+//   - GET /api/scans    → 5 most-recent jobs table w/ status badges
+//   - GET /api/projects → all projects → GET critical findings per project (parallel)
+//   - Severity breakdown bar chart (all 5 levels)
+//   - Animated count-up on stat card numbers
+//   - Auto-refresh toggle (30 s interval)
+//   - Engine summary: module count, policy count, passive vs active split
+//   - Full offline graceful degradation
 
-import { moduleDefs } from '../../core/moduleRegistry.js';
-import { scanPolicies } from '../../core/policyRegistry.js';
+'use strict';
 
-const API = window.API_BASE || '';
-
-// ── Severity colour map ───────────────────────────────────────────────────────
 const SEV_COLOR = {
-  critical : '#ff2a2a',
-  high     : '#ff6b2b',
-  medium   : '#f5a623',
-  low      : '#4fc3f7',
-  info     : '#78909c',
+  critical: '#ef4444',
+  high    : '#f97316',
+  medium  : '#eab308',
+  low     : '#3b82f6',
+  info    : '#94a3b8',
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// renderDashboard(container)
-// ─────────────────────────────────────────────────────────────────────────────
+const STATUS_COLOR = {
+  completed  : '#22c55e',
+  running    : '#38bdf8',
+  queued     : '#a78bfa',
+  failed     : '#ef4444',
+  interrupted: '#f97316',
+  cancelled  : '#64748b',
+};
+
+// Module counts — inline so view works without bundler import from core
+const _PASSIVE_IDS = [
+  'exposure.env.direct','exposure.env.variants','exposure.backup.db_dumps',
+  'exposure.backup.archives','misconfig.dirlisting.generic','vcs.git.exposed',
+  'debug.stacktraces','tls.headers.basic','cookie.session.flags',
+  'exposure.js.secrets','exposure.sourcemap','exposure.cve.cpanel_whm',
+  'exposure.cve.laravel_env_hunt','cve.fingerprints','misconfig.phpinfo.exposed',
+  'vcs.svn_hg.exposed','exposure.cve.vite_bypass','exposure.cve.mautic_env',
+  'exposure.cve.moodle_listing','exposure.cloud.open_bucket','exposure.cms.wp_debug',
+];
+const _ACTIVE_IDS = [
+  'injection.sqli.basic','injection.xss.reflected_basic','injection.path_traversal.basic',
+  'injection.cmdi.basic','injection.ssti.basic','injection.fileupload.detect',
+];
+const _MODULE_TOTAL  = _PASSIVE_IDS.length + _ACTIVE_IDS.length;
+const _POLICY_TOTAL  = 3;
+
+let _autoRefreshTimer = null;
+let _autoRefreshOn    = false;
+let _container        = null;
+
+// ── Entry point ───────────────────────────────────────────────────────────────
 export async function renderDashboard(container) {
-  // Optimistic skeleton while data loads
-  container.innerHTML = _skeleton();
+  _container = container;
+  _showSkeleton(container);
 
-  let stats = null;
-  let jobs  = [];
-  let recentFindings = [];
+  const [health, stats, jobs, critFindings] = await Promise.all([
+    _fetchHealth(),
+    _fetchStats(),
+    _fetchRecentJobs(),
+    _fetchCriticalFindings(),
+  ]);
 
+  container.innerHTML = _buildHTML(health, stats, jobs, critFindings);
+  _wireButtons(container);
+  _animateCounters(container);
+}
+
+// ── Data fetchers ────────────────────────────────────────────────────────────
+async function _fetchHealth() {
   try {
-    const [sRes, jRes] = await Promise.all([
-      fetch(`${API}/api/stats`),
-      fetch(`${API}/api/scans?limit=5`),
-    ]);
-
-    if (sRes.ok) stats = await sRes.json();
-    if (jRes.ok) {
-      const body = await jRes.json();
-      jobs = Array.isArray(body) ? body.slice(0, 5) : (body.jobs || []).slice(0, 5);
-    }
-
-    // Pull recent critical+high findings if we have a stats object
-    if (stats) {
-      const fRes = await fetch(`${API}/api/projects?limit=1`);
-      if (fRes.ok) {
-        const projects = await fRes.json();
-        const pid = Array.isArray(projects) ? projects[0]?.id : null;
-        if (pid) {
-          const rfRes = await fetch(`${API}/api/projects/${pid}/findings?severity=critical&limit=5`);
-          if (rfRes.ok) recentFindings = await rfRes.json();
-        }
-      }
-    }
-  } catch (e) {
-    console.warn('[dashboard] fetch error', e);
+    const res = await fetch(`${_api()}/api/health`, { signal: _timeout(4000) });
+    if (res.ok) return { ok: true, ...(await res.json().catch(() => ({}))) };
+    return { ok: false, status: res.status };
+  } catch {
+    return { ok: false, offline: true };
   }
-
-  container.innerHTML = _render(stats, jobs, recentFindings);
-  _attachRefresh(container);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Skeleton (shown while loading)
-// ─────────────────────────────────────────────────────────────────────────────
-function _skeleton() {
-  return `
-    <div class="dash-header">
-      <h1 class="dash-title">Dashboard</h1>
-      <span class="dash-loading">⟳ Loading…</span>
-    </div>
-    <div class="dash-cards">
-      ${['Projects','Targets','Jobs','Findings'].map(l =>
-        `<div class="dash-card dash-card--loading"><span class="dash-card-label">${l}</span><span class="dash-card-value">—</span></div>`
-      ).join('')}
-    </div>
-  `;
+async function _fetchStats() {
+  try {
+    const res = await fetch(`${_api()}/api/stats`, { signal: _timeout(6000) });
+    if (res.ok) return await res.json().catch(() => null);
+  } catch { /* offline */ }
+  return null;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Main render
-// ─────────────────────────────────────────────────────────────────────────────
-function _render(stats, jobs, recentFindings) {
-  const s = stats || {};
+async function _fetchRecentJobs() {
+  try {
+    const res = await fetch(`${_api()}/api/scans?limit=6`, { signal: _timeout(6000) });
+    if (!res.ok) return [];
+    const body = await res.json().catch(() => []);
+    const arr  = Array.isArray(body) ? body : (body.jobs || body.scans || []);
+    return arr.slice(0, 6);
+  } catch {
+    return [];
+  }
+}
 
-  const cards = [
-    { label: 'Projects',  value: s.projects  ?? '—', icon: '🗂' },
-    { label: 'Targets',   value: s.targets   ?? '—', icon: '🎯' },
-    { label: 'Jobs Run',  value: s.jobs      ?? '—', icon: '⚙️'  },
-    { label: 'Findings',  value: s.findings  ?? '—', icon: '🔍' },
-  ];
+async function _fetchCriticalFindings() {
+  try {
+    // Get all projects first
+    const pRes = await fetch(`${_api()}/api/projects`, { signal: _timeout(6000) });
+    if (!pRes.ok) return [];
+    const pBody    = await pRes.json().catch(() => []);
+    const projects = (Array.isArray(pBody) ? pBody : (pBody.projects || [])).slice(0, 8);
+    if (!projects.length) return [];
 
-  const sevBreakdown = s.severity || {};
+    // Fan out: fetch critical findings per project in parallel
+    const perProject = await Promise.all(
+      projects.map(p =>
+        fetch(`${_api()}/api/projects/${encodeURIComponent(p.id)}/findings?severity=critical&limit=4`, {
+          signal: _timeout(5000),
+        })
+        .then(r => r.ok ? r.json().catch(() => []) : [])
+        .catch(() => [])
+      )
+    );
+    // Flatten, deduplicate by id, return newest 8
+    const all  = perProject.flat();
+    const seen = new Set();
+    return all.filter(f => { if (seen.has(f.id)) return false; seen.add(f.id); return true; })
+              .slice(0, 8);
+  } catch {
+    return [];
+  }
+}
+
+// ── HTML builder ──────────────────────────────────────────────────────────────
+function _buildHTML(health, stats, jobs, critFindings) {
+  const s  = stats || {};
+  const sev = s.severity || {};
+  const totalSev = Object.values(sev).reduce((a, b) => a + b, 0) || 1;
 
   return `
-    <div class="dash-header">
-      <h1 class="dash-title">Dashboard</h1>
-      <button class="btn btn--sm" id="dash-refresh-btn" title="Refresh stats">⟳ Refresh</button>
+    <!-- Header row -->
+    <div style="display:flex;align-items:center;justify-content:space-between;
+      flex-wrap:wrap;gap:8px;margin-bottom:16px;">
+      <h1 style="margin:0;">Dashboard</h1>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        ${_healthBadge(health)}
+        <button id="dash-auto-btn" style="${_btn('#1e293b','#94a3b8')}font-size:10px;">
+          ${_autoRefreshOn ? '⏸ Auto-refresh ON' : '⏵ Auto-refresh'}
+        </button>
+        <button id="dash-refresh-btn" style="${_btn('#1e293b','#94a3b8')}font-size:10px;">↻ Refresh</button>
+      </div>
     </div>
 
-    <!-- ── Stat cards ────────────────────────────────────────────────────── -->
-    <div class="dash-cards">
-      ${cards.map(c => `
-        <div class="dash-card">
-          <span class="dash-card-icon">${c.icon}</span>
-          <span class="dash-card-value">${c.value}</span>
-          <span class="dash-card-label">${c.label}</span>
-        </div>`).join('')}
+    <!-- Stat cards -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+      gap:10px;margin-bottom:16px;">
+      ${_statCard('🗂', 'Projects',  s.projects ?? 0,  '#38bdf8')}
+      ${_statCard('🎯', 'Targets',   s.targets  ?? 0,  '#a78bfa')}
+      ${_statCard('⚙️',  'Jobs Run',  s.jobs     ?? 0,  '#22c55e')}
+      ${_statCard('🔍', 'Findings',  s.findings  ?? 0, '#ef4444')}
     </div>
 
-    <!-- ── Severity breakdown ────────────────────────────────────────────── -->
-    ${Object.keys(sevBreakdown).length ? `
-    <section class="dash-section">
-      <h2 class="dash-section-title">Findings by Severity</h2>
-      <div class="dash-sev-bars">
+    <!-- Two-column grid on wide screens -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
+      gap:12px;margin-bottom:12px;">
+
+      <!-- Severity breakdown -->
+      <div style="${_card()}">
+        <div style="${_sectionTitle()}">Findings by Severity</div>
         ${Object.entries(SEV_COLOR).map(([sev, col]) => {
-          const count = sevBreakdown[sev] || 0;
-          const total = Object.values(sevBreakdown).reduce((a, b) => a + b, 0) || 1;
-          const pct   = Math.round((count / total) * 100);
+          const count = s.severity?.[sev] ?? 0;
+          const pct   = Math.round((count / totalSev) * 100);
           return `
-            <div class="dash-sev-row">
-              <span class="dash-sev-label" style="color:${col}">${sev}</span>
-              <div class="dash-sev-track">
-                <div class="dash-sev-fill" style="width:${pct}%;background:${col}"></div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+              <span style="width:62px;font-size:10px;font-weight:700;color:${col};
+                text-transform:uppercase;text-align:right;">${sev}</span>
+              <div style="flex:1;background:#0f172a;border-radius:4px;height:12px;overflow:hidden;">
+                <div style="height:100%;background:${col};border-radius:4px;
+                  width:${pct}%;transition:width .6s ease;"></div>
               </div>
-              <span class="dash-sev-count">${count}</span>
+              <span style="width:30px;font-size:11px;color:#94a3b8;text-align:right;">${count}</span>
             </div>`;
         }).join('')}
+        ${!Object.keys(sev).length ? `<p style="color:#475569;font-size:11px;margin:0;">No findings yet.</p>` : ''}
       </div>
-    </section>` : ''}
 
-    <!-- ── Recent jobs ───────────────────────────────────────────────────── -->
-    <section class="dash-section">
-      <h2 class="dash-section-title">Recent Jobs</h2>
-      ${jobs.length ? `
-        <table class="dash-table">
-          <thead><tr><th>ID</th><th>Policy</th><th>Status</th><th>Started</th></tr></thead>
-          <tbody>
-            ${jobs.map(j => `
-              <tr>
-                <td class="mono" title="${j.id}">${String(j.id).slice(0, 8)}…</td>
-                <td>${j.policy_id || j.policyId || '—'}</td>
-                <td><span class="badge badge--${_statusClass(j.status)}">${j.status}</span></td>
-                <td>${j.created_at ? new Date(j.created_at).toLocaleString() : '—'}</td>
-              </tr>`).join('')}
-          </tbody>
-        </table>` : `<p class="dash-empty">No jobs yet. Run a scan to get started.</p>`}
-    </section>
+      <!-- Engine summary -->
+      <div style="${_card()}">
+        <div style="${_sectionTitle()}">Engine</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+          ${_pill(_MODULE_TOTAL + ' modules', '#38bdf8')}
+          ${_pill(_POLICY_TOTAL + ' policies', '#a78bfa')}
+          ${_pill(_PASSIVE_IDS.length + ' passive', '#22c55e')}
+          ${_pill(_ACTIVE_IDS.length + ' active', '#ef4444')}
+        </div>
+        <div style="font-size:11px;color:#475569;line-height:1.7;">
+          <div>Version &nbsp;<span style="color:#94a3b8;">v1.8.0</span></div>
+          <div>Policies &nbsp;<span style="color:#94a3b8;">Normal &middot; Aggressive &middot; Extreme</span></div>
+          <div>Last scan &nbsp;<span style="color:#94a3b8;">${
+            jobs.length
+              ? _fmtTime(jobs[0]?.created_at || jobs[0]?.started_at)
+              : 'never'
+          }</span></div>
+        </div>
+        <details style="margin-top:10px;">
+          <summary style="cursor:pointer;font-size:10px;color:#475569;">Module IDs</summary>
+          <pre style="font-size:9px;color:#64748b;line-height:1.6;margin-top:6px;overflow-x:auto;">${
+            [..._PASSIVE_IDS, ..._ACTIVE_IDS].map(id => ` • ${id}`).join('\n')
+          }</pre>
+        </details>
+      </div>
+    </div>
 
-    <!-- ── Recent critical findings ──────────────────────────────────────── -->
-    ${recentFindings.length ? `
-    <section class="dash-section">
-      <h2 class="dash-section-title">Recent Critical Findings</h2>
-      <ul class="dash-findings-list">
-        ${recentFindings.map(f => `
-          <li class="dash-finding-item">
-            <span class="badge badge--critical">CRIT</span>
-            <span class="dash-finding-title">${_esc(f.title)}</span>
-            <span class="dash-finding-target mono">${_esc(f.target || '')}</span>
-          </li>`).join('')}
-      </ul>
-    </section>` : ''}
+    <!-- Recent jobs -->
+    <div style="${_card()}margin-bottom:12px;">
+      <div style="${_sectionTitle()}">Recent Jobs</div>
+      ${ jobs.length
+        ? `<div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:11px;">
+              <thead>
+                <tr style="border-bottom:2px solid #1e293b;">
+                  ${['Job ID','Policy','Status','Targets','Started'].map(h =>
+                    `<th style="text-align:left;padding:5px 8px;font-size:10px;
+                      text-transform:uppercase;letter-spacing:.07em;color:#64748b;">${h}</th>`
+                  ).join('')}
+                </tr>
+              </thead>
+              <tbody>
+                ${jobs.map(j => {
+                  const sc  = STATUS_COLOR[j.status] || '#64748b';
+                  const tgt = j.targets_json
+                    ? (() => { try { return JSON.parse(j.targets_json).length; } catch { return '?'; } })()
+                    : (j.targets?.length ?? '—');
+                  return `<tr style="border-bottom:1px solid #111827;">
+                    <td style="padding:6px 8px;font-family:monospace;color:#e2e8f0;">
+                      ${_esc(String(j.id).slice(0,10))}…</td>
+                    <td style="padding:6px 8px;color:#94a3b8;">${_esc(j.policy_id || j.policyId || '—')}</td>
+                    <td style="padding:6px 8px;">
+                      <span style="background:${sc}22;color:${sc};border:1px solid ${sc}55;
+                        border-radius:4px;padding:2px 7px;font-size:10px;font-weight:700;
+                        text-transform:uppercase;">${_esc(j.status || '?')}</span></td>
+                    <td style="padding:6px 8px;color:#64748b;">${tgt}</td>
+                    <td style="padding:6px 8px;color:#64748b;">${_fmtTime(j.created_at)}</td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>`
+        : `<p style="color:#475569;font-size:12px;margin:0;">No jobs yet. Run a scan to get started.</p>`
+      }
+    </div>
 
-    <!-- ── Engine info (always shown) ───────────────────────────────────── -->
-    <section class="dash-section dash-section--muted">
-      <h2 class="dash-section-title">Engine</h2>
-      <p>${moduleDefs.length} modules loaded &nbsp;·&nbsp; ${scanPolicies.length} scan policies</p>
-      <details style="margin-top:8px">
-        <summary style="cursor:pointer;opacity:.7">Module IDs</summary>
-        <pre class="dash-pre">${moduleDefs.map(m => ` - ${m.id}`).join('\n')}</pre>
-      </details>
-    </section>
+    <!-- Recent critical findings -->
+    ${ critFindings.length ? `
+    <div style="${_card()}">
+      <div style="${_sectionTitle()}">Recent Critical Findings</div>
+      ${critFindings.map(f => `
+        <div style="display:flex;align-items:flex-start;gap:8px;padding:7px 0;
+          border-bottom:1px solid #111827;">
+          <span style="background:#ef444422;color:#ef4444;border:1px solid #ef444455;
+            border-radius:4px;padding:2px 7px;font-size:9px;font-weight:700;
+            white-space:nowrap;margin-top:2px;">CRIT</span>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:12px;color:#e2e8f0;font-weight:600;">${_esc(f.title || f.name || '(untitled)')}</div>
+            <div style="font-size:10px;color:#64748b;font-family:monospace;margin-top:2px;
+              overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_esc(f.target || f.url || '')}</div>
+          </div>
+          <span style="font-size:9px;color:#475569;white-space:nowrap;margin-top:4px;">${_esc(f.module_id || f.moduleId || '')}</span>
+        </div>`).join('')}
+    </div>` : '' }
   `;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
-function _attachRefresh(container) {
-  const btn = container.querySelector('#dash-refresh-btn');
-  if (btn) btn.addEventListener('click', () => renderDashboard(container));
+// ── Component helpers ──────────────────────────────────────────────────────────
+function _statCard(icon, label, value, color) {
+  return `
+    <div style="${_card()}text-align:center;">
+      <div style="font-size:22px;margin-bottom:4px;">${icon}</div>
+      <div class="dash-counter" data-target="${value}"
+        style="font-size:28px;font-weight:800;color:${color};font-family:monospace;">
+        ${value}
+      </div>
+      <div style="font-size:11px;color:#64748b;text-transform:uppercase;
+        letter-spacing:.07em;margin-top:2px;">${label}</div>
+    </div>`;
 }
 
-function _statusClass(status) {
-  const map = { completed: 'ok', running: 'running', queued: 'queued',
-                failed: 'error', interrupted: 'warn', cancelled: 'warn' };
-  return map[status] || 'default';
+function _healthBadge(h) {
+  if (!h) return '';
+  if (h.offline)         return `<span style="${_badgeStyle('#64748b')}">⚫ Offline</span>`;
+  if (!h.ok)             return `<span style="${_badgeStyle('#ef4444')}">🔴 Degraded (${h.status || '?'})</span>`;
+  return                        `<span style="${_badgeStyle('#22c55e')}">🟢 Online</span>`;
 }
 
-function _esc(str) {
-  return String(str)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+function _badgeStyle(color) {
+  return `background:${color}22;color:${color};border:1px solid ${color}55;` +
+    'border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;';
+}
+
+function _pill(text, color) {
+  return `<span style="background:${color}22;color:${color};border:1px solid ${color}44;
+    border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700;">${_esc(text)}</span>`;
+}
+
+// ── Animated count-up ─────────────────────────────────────────────────────────
+function _animateCounters(container) {
+  container.querySelectorAll('.dash-counter').forEach(el => {
+    const target = parseInt(el.dataset.target, 10) || 0;
+    if (target === 0) return;
+    const duration = 600;
+    const start    = performance.now();
+    const tick = (now) => {
+      const progress = Math.min((now - start) / duration, 1);
+      el.textContent = Math.round(progress * target);
+      if (progress < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+}
+
+// ── Buttons ─────────────────────────────────────────────────────────────────────
+function _wireButtons(container) {
+  container.querySelector('#dash-refresh-btn')
+    ?.addEventListener('click', () => renderDashboard(container));
+
+  const autoBtn = container.querySelector('#dash-auto-btn');
+  autoBtn?.addEventListener('click', () => {
+    _autoRefreshOn = !_autoRefreshOn;
+    autoBtn.textContent = _autoRefreshOn ? '⏸ Auto-refresh ON' : '⏵ Auto-refresh';
+    autoBtn.style.color = _autoRefreshOn ? '#38bdf8' : '#94a3b8';
+    clearInterval(_autoRefreshTimer);
+    if (_autoRefreshOn) {
+      _autoRefreshTimer = setInterval(() => renderDashboard(container), 30_000);
+    }
+  });
+}
+
+// ── Skeleton ────────────────────────────────────────────────────────────────────
+function _showSkeleton(container) {
+  container.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <h1 style="margin:0;">Dashboard</h1>
+      <span style="font-size:11px;color:#475569;">⟳ Loading…</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;">
+      ${[...Array(4)].map(() => `
+        <div style="${_card()}text-align:center;animation:pulse 1.5s infinite;">
+          <div style="height:22px;background:#1e293b;border-radius:4px;margin-bottom:8px;"></div>
+          <div style="height:36px;background:#1e293b;border-radius:4px;margin-bottom:6px;"></div>
+          <div style="height:12px;background:#1e293b;border-radius:4px;width:60%;margin:0 auto;"></div>
+        </div>`).join('')}
+    </div>`;
+}
+
+// ── Utility ──────────────────────────────────────────────────────────────────────
+function _api() {
+  return (window._wvcState?.cfg?.backendUrl)
+    || (window.CFG?.backendUrl)
+    || localStorage.getItem('wvc_backend_url')
+    || window.API_BASE
+    || '';
+}
+
+function _timeout(ms) {
+  return AbortSignal.timeout ? AbortSignal.timeout(ms) : new AbortController().signal;
+}
+
+function _fmtTime(ts) {
+  if (!ts) return '—';
+  try { return new Date(ts).toLocaleString(); } catch { return ts; }
+}
+
+function _esc(s) {
+  return String(s ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function _card() {
+  return 'background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:14px;';
+}
+
+function _btn(bg, fg) {
+  return `background:${bg};color:${fg};border:1px solid #1e293b;border-radius:5px;` +
+    'padding:5px 10px;font-family:monospace;cursor:pointer;' +
+    'display:inline-flex;align-items:center;gap:4px;';
+}
+
+function _sectionTitle() {
+  return 'font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;' +
+    'letter-spacing:.07em;margin-bottom:10px;';
 }
