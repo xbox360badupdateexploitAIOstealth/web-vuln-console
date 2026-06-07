@@ -1,8 +1,10 @@
 // src/core/engine.js
-// Scan engine: passive exposure + TLS/headers + cookie/session + HTML crawl +
-// JS secret scan + source map detect + cPanel/WHM scan + CVE fingerprints +
-// Laravel .env hunt + CVE passive checks + active injection.
-// v1.8.0 — Phase 1g cvePassive wired (TODO-06).
+// Scan engine: tech fingerprint + passive exposure + TLS/headers + cookie/session +
+// HTML crawl + JS secret scan + source map detect + robots.txt recon +
+// cPanel/WHM scan + CVE fingerprints + Laravel .env hunt + CVE passive checks +
+// phpinfo + admin panel detect + CORS + HTTP methods + API exposure +
+// open redirect + SSRF + active injection.
+// v2.0.0 — TODO-ENGINE complete: all 9 new check files wired.
 
 import { ScanJob, Finding, Evidence } from './models.js';
 import { moduleDefById }               from './moduleRegistry.js';
@@ -27,6 +29,15 @@ import {
   runCloudBucketsCheck,
   runWpDebugCheck,
 } from './checks/cvePassive.js';
+import { runTechFingerprint }  from './checks/techFingerprint.js';
+import { runPhpInfoExposure }  from './checks/phpInfoExposure.js';
+import { runAdminPanelDetect } from './checks/adminPanelDetect.js';
+import { runCorsMisconfig }    from './checks/corsMisconfig.js';
+import { runHttpMethodsProbe } from './checks/httpMethodsProbe.js';
+import { runRobotsTxtParse }   from './checks/robotsTxtParse.js';
+import { runApiExposure }      from './checks/apiKeyExposure.js';
+import { runOpenRedirect }     from './checks/openRedirect.js';
+import { runSsrfProbe }        from './checks/ssrfProbe.js';
 
 export class EngineConfig {
   constructor({ fetchAdapter, baseUrlResolver }) {
@@ -92,6 +103,17 @@ async function scanTarget({ ctx, target, enabledModules, engineConfig }) {
   const baseUrl = engineConfig.baseUrlResolver(target);
   ctx.log(`\n--- Scanning target: ${target.host} (${baseUrl}) ---`);
   const siteModel = ctx.getOrCreateSiteModel(target.id);
+
+  // ── Phase 1a: Tech stack fingerprint (runs first — populates siteModel.techStack) ──
+  if (moduleEnabled(enabledModules, 'recon.tech_fingerprint')) {
+    await runTechFingerprint({
+      ctx,
+      target,
+      baseUrl,
+      siteModel,
+      fetchAdapter: engineConfig.fetchAdapter,
+    });
+  }
 
   // ── Phase 1: Passive exposure checks ──────────────────────────────────────────────
   await runPassiveExposureChecks({ ctx, target, baseUrl, siteModel, enabledModules, engineConfig });
@@ -168,6 +190,47 @@ async function scanTarget({ ctx, target, enabledModules, engineConfig }) {
     await runWpDebugCheck({ ctx, target, baseUrl, fetchAdapter: engineConfig.fetchAdapter });
   }
 
+  // ── Phase 1h: phpinfo exposure ─────────────────────────────────────────────────
+  if (moduleEnabled(enabledModules, 'exposure.phpinfo')) {
+    await runPhpInfoExposure({
+      ctx,
+      target,
+      baseUrl,
+      fetchAdapter: engineConfig.fetchAdapter,
+    });
+  }
+
+  // ── Phase 1h: Admin panel detection ───────────────────────────────────────────
+  if (moduleEnabled(enabledModules, 'exposure.admin_panels')) {
+    await runAdminPanelDetect({
+      ctx,
+      target,
+      baseUrl,
+      siteModel,
+      fetchAdapter: engineConfig.fetchAdapter,
+    });
+  }
+
+  // ── Phase 1h: CORS misconfiguration ───────────────────────────────────────────
+  if (moduleEnabled(enabledModules, 'misconfig.cors')) {
+    await runCorsMisconfig({
+      ctx,
+      target,
+      baseUrl,
+      fetchAdapter: engineConfig.fetchAdapter,
+    });
+  }
+
+  // ── Phase 1h: Dangerous HTTP methods ──────────────────────────────────────────
+  if (moduleEnabled(enabledModules, 'misconfig.http_methods')) {
+    await runHttpMethodsProbe({
+      ctx,
+      target,
+      baseUrl,
+      fetchAdapter: engineConfig.fetchAdapter,
+    });
+  }
+
   // ── Phase 2: HTML crawl to discover endpoints & parameters ────────────────────
   await crawlTargetAndBuildSiteModel({
     ctx,
@@ -205,6 +268,25 @@ async function scanTarget({ ctx, target, enabledModules, engineConfig }) {
     });
   }
 
+  // ── Phase 2.5c: robots.txt + sitemap.xml recon ────────────────────────────────
+  await runRobotsTxtParse({
+    ctx,
+    target,
+    baseUrl,
+    siteModel,
+    fetchAdapter: engineConfig.fetchAdapter,
+  });
+
+  // ── Phase 2.5c: API / Swagger / GraphQL exposure ──────────────────────────────
+  if (moduleEnabled(enabledModules, 'exposure.api_endpoints')) {
+    await runApiExposure({
+      ctx,
+      target,
+      baseUrl,
+      fetchAdapter: engineConfig.fetchAdapter,
+    });
+  }
+
   // ── Phase 3: Active injection checks ─────────────────────────────────────────
   await runActiveInjectionChecks({
     ctx,
@@ -213,6 +295,26 @@ async function scanTarget({ ctx, target, enabledModules, engineConfig }) {
     enabledModules,
     engineConfig,
   });
+
+  // ── Phase 3: Open redirect ────────────────────────────────────────────────────
+  if (moduleEnabled(enabledModules, 'injection.open_redirect')) {
+    await runOpenRedirect({
+      ctx,
+      target,
+      siteModel,
+      fetchAdapter: engineConfig.fetchAdapter,
+    });
+  }
+
+  // ── Phase 3: SSRF — cloud metadata & internal service probe ──────────────────
+  if (moduleEnabled(enabledModules, 'injection.ssrf.basic')) {
+    await runSsrfProbe({
+      ctx,
+      target,
+      siteModel,
+      fetchAdapter: engineConfig.fetchAdapter,
+    });
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
