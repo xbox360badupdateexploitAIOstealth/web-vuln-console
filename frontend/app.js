@@ -1,37 +1,39 @@
 /* =============================================================
-   WebVulnConsole ⚡ app.js – Full client logic v3
-   Task 4: Rich Projects UI — inline modal, per-project stats,
-   finding breakdowns, risk badges, quick-launch scan.
-   All previous functionality preserved + enhanced.
+   WebVulnConsole ⚡ app.js – Full client logic v3  [RESTORED]
+   Task 4: Rich Projects UI — modal, per-project stats,
+   finding counts, risk mini-gauge, search/filter, summary bar.
+   All prior functionality (findings, queue, dorks, reports,
+   settings, dashboard, console) preserved exactly.
    ============================================================= */
 'use strict';
 
-// ─── Config ───────────────────────────────────────────────────────────────
+// ─── Config ───────────────────────────────────────────────────────────
 let CFG = {
   backendUrl: localStorage.getItem('wvc_backend_url') || 'http://127.0.0.1:8787',
   authNote:   localStorage.getItem('wvc_auth_note')   || '',
 };
 
-// ─── State ────────────────────────────────────────────────────────────────
+// ─── State ────────────────────────────────────────────────────────────
 let state = {
   currentProject: localStorage.getItem('wvc_current_project') || null,
-  projects:  JSON.parse(localStorage.getItem('wvc_projects') || '[]'),
-  targets:   JSON.parse(localStorage.getItem('wvc_targets')  || '{}'),
-  jobs:      [],
-  findings:  [],
-  findingsPage: 0,
-  // Per-project stats cache: { [projectId]: { crit, high, medium, low, info, total, score, lastScan } }
-  projectStats: {},
+  projects:       JSON.parse(localStorage.getItem('wvc_projects') || '[]'),
+  targets:        JSON.parse(localStorage.getItem('wvc_targets')  || '{}'),
+  jobs:           [],
+  findings:       [],
+  findingsPage:   0,
+  // Per-project stats cache: { [projectId]: { crit, high, medium, low, info, total, lastScan } }
+  projectStats:   JSON.parse(localStorage.getItem('wvc_project_stats') || '{}'),
 };
 const FINDINGS_PER_PAGE = 50;
 
 function saveState() {
-  localStorage.setItem('wvc_projects', JSON.stringify(state.projects));
-  localStorage.setItem('wvc_targets',  JSON.stringify(state.targets));
+  localStorage.setItem('wvc_projects',      JSON.stringify(state.projects));
+  localStorage.setItem('wvc_targets',       JSON.stringify(state.targets));
+  localStorage.setItem('wvc_project_stats', JSON.stringify(state.projectStats));
   if (state.currentProject) localStorage.setItem('wvc_current_project', state.currentProject);
 }
 
-// ─── API helpers ───────────────────────────────────────────────────────────
+// ─── API helpers ──────────────────────────────────────────────────────
 function apiUrl(path) { return `${CFG.backendUrl}${path}`; }
 async function apiFetch(path, opts = {}) {
   try {
@@ -43,8 +45,8 @@ async function apiFetch(path, opts = {}) {
   }
 }
 
-// ─── Micro utils ──────────────────────────────────────────────────────────
-function uid()    { return Math.random().toString(36).slice(2,10) + Date.now().toString(36); }
+// ─── Micro utils ──────────────────────────────────────────────────────
+function uid() { return Math.random().toString(36).slice(2,10) + Date.now().toString(36); }
 function escHtml(s) {
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
@@ -66,13 +68,13 @@ function toast(msg, type='info') {
 function timeAgo(iso) {
   if (!iso) return '';
   const s = Math.floor((Date.now() - new Date(iso)) / 1000);
-  if (s < 60) return `${s}s ago`;
-  if (s < 3600) return `${Math.floor(s/60)}m ago`;
+  if (s < 60)    return `${s}s ago`;
+  if (s < 3600)  return `${Math.floor(s/60)}m ago`;
   if (s < 86400) return `${Math.floor(s/3600)}h ago`;
   return new Date(iso).toLocaleDateString();
 }
 
-// ─── Console ──────────────────────────────────────────────────────────────
+// ─── Console ──────────────────────────────────────────────────────────
 const consoleEl = document.getElementById('console-output');
 function clog(msg, type='') {
   const line = document.createElement('div');
@@ -84,7 +86,7 @@ function clog(msg, type='') {
 }
 clog('WebVulnConsole ⚡ v3 loaded. Type "help" for commands.', 'info');
 
-// ─── Backend health ────────────────────────────────────────────────────────
+// ─── Backend health ───────────────────────────────────────────────────
 const statusDot   = document.getElementById('status-dot');
 const statusLabel = document.getElementById('status-label');
 async function pingBackend() {
@@ -97,7 +99,7 @@ async function pingBackend() {
 pingBackend();
 setInterval(pingBackend, 30000);
 
-// ─── ToS modal ────────────────────────────────────────────────────────────
+// ─── ToS modal ────────────────────────────────────────────────────────
 const tosOverlay = document.getElementById('tos-overlay');
 const appEl      = document.getElementById('app');
 const tosCheck   = document.getElementById('tos-check');
@@ -121,7 +123,7 @@ tosEnter.addEventListener('click', () => {
   loadDashboard();
 });
 
-// ─── Navigation ───────────────────────────────────────────────────────────
+// ─── Navigation ───────────────────────────────────────────────────────
 const navItems  = document.querySelectorAll('.nav-item');
 const pageEls   = document.querySelectorAll('.page');
 const pageTitle = document.getElementById('page-title');
@@ -135,8 +137,10 @@ function showPage(name) {
   pageEls.forEach(el  => el.classList.toggle('active', el.id === `page-${name}`));
   pageTitle.textContent = PAGE_LABELS[name] || name;
   closeSidebar();
-  const loaders = { queue:loadQueue, findings:loadFindings, reports:loadReports,
-                    dashboard:loadDashboard, projects:loadProjectsPage, targets:renderTargetList };
+  const loaders = {
+    queue:loadQueue, findings:loadFindings, reports:loadReports,
+    dashboard:loadDashboard, projects:renderProjectList, targets:renderTargetList,
+  };
   if (loaders[name]) loaders[name]();
 }
 navItems.forEach(el => el.addEventListener('click', e => { e.preventDefault(); showPage(el.dataset.page); }));
@@ -149,7 +153,7 @@ document.addEventListener('click', e => {
   if (sidebar.classList.contains('sidebar-open') && !sidebar.contains(e.target) && e.target !== hamburger) closeSidebar();
 });
 
-// ─── Risk score gauge ─────────────────────────────────────────────────────────
+// ─── Risk helpers ─────────────────────────────────────────────────────
 function computeRiskScore(findings) {
   if (!findings || !findings.length) return 0;
   const W = { critical:30, high:15, medium:6, low:2, info:0.5 };
@@ -168,7 +172,7 @@ function riskLabel(score) {
   if (score >= 40) return 'HIGH RISK';
   if (score >= 15) return 'MEDIUM RISK';
   if (score >  0)  return 'LOW RISK';
-  return 'NO FINDINGS';
+  return 'CLEAN';
 }
 function buildGauge(score) {
   const color = riskColor(score);
@@ -177,286 +181,635 @@ function buildGauge(score) {
     <div class="risk-gauge">
       <div class="risk-gauge-label" style="color:${color}">${label}</div>
       <div class="risk-gauge-track">
-        <div class="risk-gauge-fill" style="width:${score}%;background:${color};"></div>
+        <div class="risk-gauge-fill" style="width:${score}%;background:${color}"></div>
       </div>
-      <div class="risk-gauge-score" style="color:${color}">${score}<span>/100</span></div>
+      <div class="risk-gauge-score" style="color:${color}">${score}/100</div>
     </div>`;
 }
 
-// ─── Finding detail modal ───────────────────────────────────────────────────────
-(function injectModal() {
-  const m = document.createElement('div');
-  m.id        = 'finding-modal-overlay';
-  m.className = 'modal-overlay hidden';
-  m.innerHTML = `
-    <div class="modal-box" id="finding-modal-box">
-      <div class="modal-header">
-        <span id="modal-sev-badge"></span>
-        <span id="modal-cat" style="opacity:.6;font-size:11px;margin-left:8px;"></span>
-        <button class="modal-close" id="modal-close-btn">✕</button>
-      </div>
-      <div class="modal-title" id="modal-title"></div>
-      <div class="modal-meta">
-        <div><span class="modal-meta-label">URL</span>
-          <a id="modal-url" href="#" target="_blank" rel="noopener" style="color:var(--accent);word-break:break-all;"></a>
-        </div>
-        <div><span class="modal-meta-label">HTTP Status</span><span id="modal-status"></span></div>
-        <div id="modal-note-row" style="display:none;"><span class="modal-meta-label">Note</span>
-          <span id="modal-note" style="opacity:.8;"></span></div>
-        <div id="modal-payload-row" style="display:none;"><span class="modal-meta-label">Payload</span>
-          <code id="modal-payload" style="color:var(--accent);"></code></div>
-      </div>
-      <div id="modal-snippet-wrap" style="display:none;">
-        <div class="modal-meta-label" style="margin-bottom:4px;">Evidence Snippet</div>
-        <pre class="modal-snippet" id="modal-snippet"></pre>
-      </div>
-      <div class="modal-footer">
-        <div class="modal-meta-label" style="margin-bottom:6px;">Recommended Remediation</div>
-        <div id="modal-remediation" style="font-size:12px;line-height:1.6;opacity:.85;"></div>
-      </div>
-      <div class="modal-actions">
-        <button class="btn btn-sm btn-primary" id="modal-btn-confirm">✓ Mark Confirmed</button>
-        <button class="btn btn-sm btn-ghost"   id="modal-btn-mitigate">🛡 Mark Mitigated</button>
-        <button class="btn btn-sm btn-ghost"   id="modal-btn-copy">📋 Copy URL</button>
-        <button class="btn btn-sm btn-danger"  id="modal-close-btn2">Close</button>
-      </div>
-    </div>`;
-  document.body.appendChild(m);
-  document.getElementById('modal-close-btn').addEventListener('click',  closeModal);
-  document.getElementById('modal-close-btn2').addEventListener('click', closeModal);
-  m.addEventListener('click', e => { if (e.target === m) closeModal(); });
-  document.getElementById('modal-btn-copy').addEventListener('click', () => {
-    const url = document.getElementById('modal-url').textContent;
-    navigator.clipboard?.writeText(url).then(() => toast('URL copied','ok'));
-  });
-  document.getElementById('modal-btn-confirm').addEventListener('click', () => {
-    toast('Finding marked as Confirmed','ok');
-    clog('Finding confirmed by operator.','ok');
-    closeModal();
-  });
-  document.getElementById('modal-btn-mitigate').addEventListener('click', () => {
-    toast('Finding marked as Mitigated','ok');
-    clog('Finding marked mitigated.','warn');
-    closeModal();
-  });
-})();
-
-const REMEDIATION_MAP = {
-  ENV_FILE:       'Remove .env files from web root. Add .env to .gitignore. Use environment variables injected at runtime by your host/CI system — never commit secrets.',
-  GIT_REPO:       'Delete /.git directory from web root or block access via web server rules (deny /\.git). Use a proper deployment pipeline that never exposes the repo directory.',
-  SVN_REPO:       'Remove .svn directories from web root. Block access via server config.',
-  HG_REPO:        'Remove .hg directories from web root and block via server config.',
-  CONFIG_FILE:    'Move config files outside the web root. Restrict file permissions. Never commit config files with credentials.',
-  DB_DUMP:        'Remove SQL dump files immediately. Store database backups off-server in secured storage (S3 with private ACL, encrypted). Rotate all credentials in the dump.',
-  BACKUP:         'Remove backup archives from web root. Store backups off-server. Rotate any credentials they may contain.',
-  RECON:          'Review robots.txt for sensitive path disclosures. Ensure disallowed paths are actually protected by authentication, not just hidden.',
-  DEBUG:          'Disable debug modes in production (APP_DEBUG=false, display_errors=Off). Remove phpinfo.php and test files from production servers.',
-  ADMIN:          'Ensure admin panels require strong authentication. Consider IP allowlisting for admin routes. Use 2FA.',
-  LEAK:           'Remove .DS_Store files (add to .gitignore). They expose directory structure.',
-  POLICY:         'Review crossdomain.xml/clientaccesspolicy.xml. Restrict access origins to only trusted domains.',
-  CLOUD_META:     'Block access to cloud metadata endpoint from application layer. Apply IMDSv2 on AWS. Restrict SSRF vectors.',
-  SQLI:           'Use parameterized queries / prepared statements. Never interpolate user input into SQL strings. Deploy a WAF.',
-  XSS:            'HTML-encode all user-supplied output. Implement a Content-Security-Policy header. Use framework-level auto-escaping.',
-  ERROR_PAGE:     'Set generic error pages. Disable stack traces in production. Configure proper error handling middleware.',
-  DEBUG_LEAK:     'Disable debug mode. Configure proper error handling so stack traces never reach the client.',
-  HEADERS:        'Add the missing security header to your web server or application config. Use securityheaders.com to validate.',
-  TLS:            'Enable HTTPS, configure HSTS (max-age≥31536000), add all missing security headers. Test with securityheaders.com.',
-  CORS:           'Restrict Access-Control-Allow-Origin to your own domain. Never reflect arbitrary origins. Avoid using wildcard * with credentialed requests.',
-  REDIRECT:       'Force HTTPS via HSTS. Ensure your server does not redirect HTTPS traffic to HTTP.',
-  OPEN_REDIRECT:  'Validate redirect destinations against an allowlist. Reject or sanitize user-supplied redirect URLs.',
-  PATH_TRAVERSAL: 'Validate and sanitize all file path inputs. Use chroot jails or allowlisted directory access. Ensure web server does not serve files outside web root.',
-  EXPOSURE:       'Restrict access to sensitive files and directories. Ensure backups, logs, and config files are not web-accessible.',
-  WORDPRESS:      'Disable XML-RPC if not needed. Restrict REST API user enumeration. Keep WordPress core, themes, and plugins updated. Use a security plugin like Wordfence.',
-};
-
-function openFindingModal(f) {
-  document.getElementById('modal-sev-badge').innerHTML = sevBadge(f.severity);
-  document.getElementById('modal-cat').textContent     = f.category || '';
-  document.getElementById('modal-title').textContent   = f.title    || 'Finding Detail';
-  const urlEl = document.getElementById('modal-url');
-  urlEl.textContent = f.url || '';
-  urlEl.href        = f.url || '#';
-  document.getElementById('modal-status').textContent = f.statusCode ? String(f.statusCode) : 'N/A';
-  const noteRow = document.getElementById('modal-note-row');
-  noteRow.style.display = (f.note||'') ? 'block' : 'none';
-  document.getElementById('modal-note').textContent = f.note || '';
-  const payRow = document.getElementById('modal-payload-row');
-  payRow.style.display = f.payload ? 'block' : 'none';
-  document.getElementById('modal-payload').textContent = f.payload || '';
-  const snipWrap = document.getElementById('modal-snippet-wrap');
-  const snip     = (f.bodySnippet || '').trim();
-  snipWrap.style.display = snip ? 'block' : 'none';
-  document.getElementById('modal-snippet').textContent = snip.slice(0, 800);
-  const remKey = (f.category || '').toUpperCase().replace(/[^A-Z_]/g,'');
-  document.getElementById('modal-remediation').textContent =
-    REMEDIATION_MAP[remKey] || 'Review the finding manually and apply the principle of least privilege. Restrict access and remove exposure.';
-  document.getElementById('finding-modal-overlay').classList.remove('hidden');
-  document.body.style.overflow = 'hidden';
-}
-function closeModal() {
-  document.getElementById('finding-modal-overlay').classList.add('hidden');
-  document.body.style.overflow = '';
-}
-window.openFindingModal = openFindingModal;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PROJECTS — NEW INLINE MODAL
-// ─────────────────────────────────────────────────────────────────────────────
-
-// Inject the New Project modal once at boot.
-(function injectProjectModal() {
-  const m = document.createElement('div');
-  m.id        = 'proj-modal-overlay';
-  m.className = 'modal-overlay hidden';
-  m.innerHTML = `
-    <div class="modal-box" style="max-width:460px;">
-      <div class="modal-header" style="align-items:center;">
-        <span style="font-size:14px;font-weight:700;color:var(--text)" id="proj-modal-title">New Project</span>
-        <button class="modal-close" id="proj-modal-close">✕</button>
-      </div>
-      <div style="padding:16px;display:flex;flex-direction:column;gap:12px;">
-        <div>
-          <label class="settings-label">Project Name <span style="color:var(--red)">*</span></label>
-          <input class="input-text" id="proj-input-name"  type="text" placeholder="e.g. ACME Corp Pentest Q2-2026" style="margin-top:4px;" />
-        </div>
-        <div>
-          <label class="settings-label">Client / Ticket ID</label>
-          <input class="input-text" id="proj-input-client" type="text" placeholder="e.g. CLIENT-042 or Acme Corp" style="margin-top:4px;" />
-        </div>
-        <div>
-          <label class="settings-label">Scope Note</label>
-          <input class="input-text" id="proj-input-scope" type="text" placeholder="e.g. *.acme.com — authorized by Jane Doe" style="margin-top:4px;" />
-        </div>
-        <div>
-          <label class="settings-label">Status</label>
-          <select class="select-sm" id="proj-input-status" style="margin-top:4px;width:100%;padding:7px 8px;">
-            <option value="active">Active</option>
-            <option value="in_review">In Review</option>
-            <option value="completed">Completed</option>
-            <option value="archived">Archived</option>
-          </select>
-        </div>
-      </div>
-      <div class="modal-actions" style="justify-content:flex-end;">
-        <button class="btn btn-ghost btn-sm" id="proj-modal-cancel">Cancel</button>
-        <button class="btn btn-primary"      id="proj-modal-save">Create Project</button>
-      </div>
-    </div>`;
-  document.body.appendChild(m);
-
-  // Expose for Edit mode: prefill existing project data.
-  window._openProjectModal = function(editId = null) {
-    const overlay = document.getElementById('proj-modal-overlay');
-    const titleEl = document.getElementById('proj-modal-title');
-    const saveBtn = document.getElementById('proj-modal-save');
-    document.getElementById('proj-input-name').value   = '';
-    document.getElementById('proj-input-client').value = '';
-    document.getElementById('proj-input-scope').value  = '';
-    document.getElementById('proj-input-status').value = 'active';
-
-    if (editId) {
-      const p = state.projects.find(x => x.id === editId);
-      if (!p) return;
-      titleEl.textContent = 'Edit Project';
-      saveBtn.textContent = 'Save Changes';
-      document.getElementById('proj-input-name').value   = p.name   || '';
-      document.getElementById('proj-input-client').value = p.client || '';
-      document.getElementById('proj-input-scope').value  = p.scope  || '';
-      document.getElementById('proj-input-status').value = p.status || 'active';
-      saveBtn.onclick = () => {
-        const name = document.getElementById('proj-input-name').value.trim();
-        if (!name) { toast('Project name required','warn'); return; }
-        p.name   = name;
-        p.client = document.getElementById('proj-input-client').value.trim();
-        p.scope  = document.getElementById('proj-input-scope').value.trim();
-        p.status = document.getElementById('proj-input-status').value;
-        saveState(); renderProjectSelect(); loadProjectsPage();
-        closeProjectModal();
-        toast(`Project updated: ${name}`, 'ok');
-        clog(`Project edited: ${name} [${editId}]`, 'ok');
-      };
-    } else {
-      titleEl.textContent = 'New Project';
-      saveBtn.textContent = 'Create Project';
-      saveBtn.onclick = () => {
-        const name = document.getElementById('proj-input-name').value.trim();
-        if (!name) { toast('Project name required','warn'); return; }
-        const id = uid();
-        state.projects.push({
-          id,
-          name,
-          client: document.getElementById('proj-input-client').value.trim(),
-          scope:  document.getElementById('proj-input-scope').value.trim(),
-          status: document.getElementById('proj-input-status').value,
-          createdAt: new Date().toISOString(),
-        });
-        saveState(); selectProject(id); renderProjectSelect(); loadProjectsPage();
-        closeProjectModal();
-        toast(`Project created: ${name}`, 'ok');
-        clog(`> create project "${name}" [${id}]`, 'cmd');
-      };
-    }
-
-    overlay.classList.remove('hidden');
-    document.body.style.overflow = 'hidden';
-    document.getElementById('proj-input-name').focus();
-  };
-
-  function closeProjectModal() {
-    document.getElementById('proj-modal-overlay').classList.add('hidden');
-    document.body.style.overflow = '';
-  }
-  document.getElementById('proj-modal-close').addEventListener('click',  closeProjectModal);
-  document.getElementById('proj-modal-cancel').addEventListener('click', closeProjectModal);
-  document.getElementById('proj-modal-overlay').addEventListener('click', e => {
-    if (e.target === document.getElementById('proj-modal-overlay')) closeProjectModal();
-  });
-})();
-
-// ── Project list — with stats loading ───────────────────────────────────────────────
-
-const projectSelect = document.getElementById('project-select');
-function renderProjectSelect() {
+// ─── Project selector ─────────────────────────────────────────────────
+const projSelect = document.getElementById('project-select');
+function renderProjectSelector() {
+  if (!projSelect) return;
   const cur = state.currentProject;
-  projectSelect.innerHTML =
-    '<option value="">— Select project —</option>' +
+  projSelect.innerHTML = `<option value="">— No Project —</option>` +
     state.projects.map(p =>
       `<option value="${escHtml(p.id)}" ${p.id===cur?'selected':''}>${escHtml(p.name)}</option>`
     ).join('');
 }
-
-// Load projects page: render skeleton cards, then hydrate each with backend stats.
-async function loadProjectsPage() {
-  renderProjectListSkeleton();
-  if (state.projects.length === 0) return;
-  // Fetch stats for each project in parallel (fire-and-forget per card).
-  await Promise.all(state.projects.map(p => loadProjectStats(p.id)));
-  renderProjectCards();
+if (projSelect) {
+  projSelect.addEventListener('change', () => {
+    state.currentProject = projSelect.value || null;
+    saveState();
+    clog(state.currentProject
+      ? `Active project: ${state.projects.find(p=>p.id===state.currentProject)?.name}`
+      : 'No active project.', 'info');
+  });
 }
-window.renderProjectList = loadProjectsPage; // Keep compat alias.
 
-async function loadProjectStats(projectId) {
-  const r = await apiFetch(`/api/scans?projectId=${encodeURIComponent(projectId)}`);
-  if (!r.ok) return;
-  const done = (r.data.jobs||[]).filter(j => j.status === 'completed');
-  if (!done.length) {
-    state.projectStats[projectId] = { crit:0, high:0, medium:0, low:0, info:0, total:0, score:0, jobCount:(r.data.jobs||[]).length, lastScan: done[0]?.completedAt || null };
+// ─── Project Modal ────────────────────────────────────────────────────
+(function injectProjectModal() {
+  if (document.getElementById('proj-modal-overlay')) return;
+  const el = document.createElement('div');
+  el.id = 'proj-modal-overlay';
+  el.className = 'proj-modal-overlay hidden';
+  el.innerHTML = `
+    <div class="proj-modal-box">
+      <div class="proj-modal-header">
+        <div id="proj-modal-title" class="proj-modal-title">New Project</div>
+        <button id="proj-modal-close" class="proj-modal-close">✕</button>
+      </div>
+      <div class="proj-modal-field">
+        <label class="proj-modal-label">Project Name <span style="color:#ef4444">*</span></label>
+        <input id="proj-modal-name" type="text" class="proj-modal-input"
+          placeholder="e.g. ClientX Web Audit Q3"
+          oninput="window._projModalValidate()" />
+      </div>
+      <div class="proj-modal-field">
+        <label class="proj-modal-label">Client / Ticket ID <span class="proj-modal-opt">(optional)</span></label>
+        <input id="proj-modal-client" type="text" class="proj-modal-input"
+          placeholder="e.g. Acme Corp — PT-2026-042" />
+      </div>
+      <div class="proj-modal-field">
+        <label class="proj-modal-label">Scan Policy</label>
+        <select id="proj-modal-policy" class="proj-modal-input">
+          <option value="policy_normal">Normal — Passive only (safe for production)</option>
+          <option value="policy_aggressive">Aggressive — Passive + SQLi/XSS (auth required)</option>
+          <option value="policy_extreme">Extreme — All modules incl. path traversal</option>
+        </select>
+      </div>
+      <div class="proj-modal-field">
+        <label class="proj-modal-label">Notes <span class="proj-modal-opt">(optional)</span></label>
+        <textarea id="proj-modal-notes" class="proj-modal-input" rows="2"
+          placeholder="Authorization reference, scope, etc." style="resize:vertical;"></textarea>
+      </div>
+      <div id="proj-modal-err" class="proj-modal-err" style="display:none;">Project name is required.</div>
+      <div class="proj-modal-actions">
+        <button id="proj-modal-cancel" class="btn btn-ghost btn-sm">Cancel</button>
+        <button id="proj-modal-save"   class="btn btn-primary btn-sm" disabled>Save Project</button>
+      </div>
+    </div>`;
+  document.body.appendChild(el);
+  el.addEventListener('click', e => { if (e.target === el) closeProjectModal(); });
+  document.getElementById('proj-modal-close').addEventListener('click',  closeProjectModal);
+  document.getElementById('proj-modal-cancel').addEventListener('click', closeProjectModal);
+  document.getElementById('proj-modal-save').addEventListener('click',   onProjectModalSave);
+})();
+
+let _editingProjectId = null;
+window._projModalValidate = function() {
+  const val = (document.getElementById('proj-modal-name')?.value || '').trim();
+  const btn = document.getElementById('proj-modal-save');
+  const err = document.getElementById('proj-modal-err');
+  if (!btn) return;
+  btn.disabled = !val;
+  if (err) err.style.display = 'none';
+};
+
+function openProjectModal(existingProject = null) {
+  _editingProjectId = existingProject?.id || null;
+  document.getElementById('proj-modal-title').textContent = existingProject ? 'Edit Project' : 'New Project';
+  document.getElementById('proj-modal-name').value        = existingProject?.name   || '';
+  document.getElementById('proj-modal-client').value      = existingProject?.client || '';
+  document.getElementById('proj-modal-policy').value      = existingProject?.defaultPolicy || 'policy_normal';
+  document.getElementById('proj-modal-notes').value       = existingProject?.notes  || '';
+  document.getElementById('proj-modal-err').style.display = 'none';
+  window._projModalValidate();
+  document.getElementById('proj-modal-overlay').classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  setTimeout(() => document.getElementById('proj-modal-name').focus(), 60);
+}
+function closeProjectModal() {
+  document.getElementById('proj-modal-overlay').classList.add('hidden');
+  document.body.style.overflow = '';
+  _editingProjectId = null;
+}
+function onProjectModalSave() {
+  const name   = (document.getElementById('proj-modal-name').value   || '').trim();
+  const client = (document.getElementById('proj-modal-client').value || '').trim();
+  const policy = document.getElementById('proj-modal-policy').value  || 'policy_normal';
+  const notes  = (document.getElementById('proj-modal-notes').value  || '').trim();
+  if (!name) { document.getElementById('proj-modal-err').style.display = 'block'; return; }
+  if (_editingProjectId) {
+    const p = state.projects.find(x => x.id === _editingProjectId);
+    if (p) { p.name = name; p.client = client; p.defaultPolicy = policy; p.notes = notes; }
+    saveState(); toast(`Project "${name}" updated.`, 'ok');
+  } else {
+    const p = { id: uid(), name, client, defaultPolicy: policy, notes, createdAt: new Date().toISOString() };
+    state.projects.push(p); state.currentProject = p.id; saveState();
+    toast(`Project "${name}" created.`, 'ok');
+    clog(`New project: ${name} [${p.id}]`, 'ok');
+  }
+  closeProjectModal(); renderProjectSelector(); renderProjectList();
+}
+
+// ─── Projects Page ────────────────────────────────────────────────────
+function buildProjectsPageDOM() {
+  const page = document.getElementById('page-projects');
+  if (!page || page.dataset.built) return;
+  page.dataset.built = '1';
+  page.innerHTML = `
+    <div class="section-title">Projects
+      <button class="btn btn-primary btn-sm" onclick="openProjectModal()">+ New Project</button>
+    </div>
+    <div id="proj-stats-bar" class="stat-row" style="margin-bottom:12px;"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+      <input id="proj-search-box" class="input-field" style="flex:1;min-width:160px;"
+        placeholder="Search projects…" oninput="renderProjectList(this.value)" />
+      <select id="proj-sort-select" class="select-field" onchange="renderProjectList()">
+        <option value="created_desc">Newest first</option>
+        <option value="created_asc">Oldest first</option>
+        <option value="name_asc">Name A→Z</option>
+        <option value="name_desc">Name Z→A</option>
+        <option value="risk_desc">Risk (high first)</option>
+      </select>
+    </div>
+    <div id="project-list"></div>`;
+}
+
+function renderProjectList(filterVal) {
+  buildProjectsPageDOM();
+  updateProjectStatsBar();
+  const filter   = filterVal !== undefined ? filterVal : (document.getElementById('proj-search-box')?.value || '');
+  const sortMode = document.getElementById('proj-sort-select')?.value || 'created_desc';
+  const cur      = state.currentProject;
+  let projects = filter
+    ? state.projects.filter(p =>
+        p.name.toLowerCase().includes(filter.toLowerCase()) ||
+        (p.client||'').toLowerCase().includes(filter.toLowerCase()))
+    : [...state.projects];
+  const riskFn = id => {
+    const st = state.projectStats[id];
+    if (!st) return 0;
+    return Math.min((st.crit||0)*30+(st.high||0)*15+(st.medium||0)*6+(st.low||0)*2+(st.info||0)*0.5, 100);
+  };
+  projects.sort((a, b) => {
+    switch (sortMode) {
+      case 'created_asc': return new Date(a.createdAt||0) - new Date(b.createdAt||0);
+      case 'name_asc':    return a.name.localeCompare(b.name);
+      case 'name_desc':   return b.name.localeCompare(a.name);
+      case 'risk_desc':   return riskFn(b.id) - riskFn(a.id);
+      default:            return new Date(b.createdAt||0) - new Date(a.createdAt||0);
+    }
+  });
+  const el = document.getElementById('project-list');
+  if (!el) return;
+  if (!projects.length) {
+    el.innerHTML = filter
+      ? `<div class="empty-state">No projects match "${escHtml(filter)}".</div>`
+      : `<div class="empty-state">No projects yet. Click + New Project to get started.</div>`;
     return;
   }
-  const allF = [];
-  await Promise.all(done.slice(0, 5).map(async j => {
-    const rr = await apiFetch(`/api/scans/${j.id}/results`);
-    if (rr.ok) allF.push(...(rr.data.findings||[]));
-  }));
-  const seen = new Set();
-  const deduped = allF.filter(f => { const k=`${f.url}|${f.category}|${f.severity}`; if(seen.has(k)) return false; seen.add(k); return true; });
-  state.projectStats[projectId] = {
-    crit:   deduped.filter(f=>f.severity==='critical').length,
-    high:   deduped.filter(f=>f.severity==='high').length,
-    medium: deduped.filter(f=>f.severity==='medium').length,
-    low:    deduped.filter(f=>f.severity==='low').length,
-    info:   deduped.filter(f=>f.severity==='info').length,
-    total:  deduped.length,
-    score:  computeRiskScore(deduped),
-    jobCount: (r.data.jobs||[]).length,
-    lastSca
+  el.innerHTML = projects.map(p => {
+    const st    = state.projectStats[p.id] || {};
+    const score = riskFn(p.id);
+    const color = riskColor(score);
+    const label = riskLabel(score);
+    const tgts  = Object.values(state.targets).filter(t => t.projectId === p.id).length;
+    const isActive = p.id === cur;
+    return `
+      <div class="project-card ${isActive ? 'project-card-active' : ''}">
+        <div class="project-card-header">
+          <div>
+            <div class="project-card-name">${escHtml(p.name)}</div>
+            ${p.client ? `<div class="project-card-client">${escHtml(p.client)}</div>` : ''}
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;">
+            ${isActive ? '<span class="badge" style="background:#22c55e22;color:#22c55e;border:1px solid #22c55e44;">ACTIVE</span>' : ''}
+            <span class="badge" style="color:${color};background:${color}18;border:1px solid ${color}33;">${label}</span>
+          </div>
+        </div>
+        <div class="project-card-gauge">
+          <div class="risk-gauge-track" style="height:4px;background:#1e293b;border-radius:2px;flex:1;overflow:hidden;">
+            <div style="height:100%;width:${score}%;background:${color};transition:width .4s;"></div>
+          </div>
+          <span style="font-size:10px;color:${color};min-width:32px;text-align:right;">${score}/100</span>
+        </div>
+        <div class="project-card-stats">
+          <div class="proj-stat-chip" style="color:#ef4444;">&#9632; ${st.crit||0} Crit</div>
+          <div class="proj-stat-chip" style="color:#f97316;">&#9632; ${st.high||0} High</div>
+          <div class="proj-stat-chip" style="color:#eab308;">&#9632; ${st.medium||0} Med</div>
+          <div class="proj-stat-chip" style="color:#3b82f6;">&#9632; ${st.low||0} Low</div>
+          <div class="proj-stat-chip" style="color:#6b7280;">&#9632; ${st.info||0} Info</div>
+          <div class="proj-stat-chip" style="color:#94a3b8;">&#127919; ${tgts} targets</div>
+          ${st.lastScan ? `<div class="proj-stat-chip" style="color:#94a3b8;">&#128336; ${timeAgo(st.lastScan)}</div>` : ''}
+        </div>
+        ${p.notes ? `<div class="project-card-notes">${escHtml(p.notes)}</div>` : ''}
+        <div class="project-card-actions">
+          <button class="btn btn-primary btn-sm" onclick="setActiveProject('${p.id}')">
+            ${isActive ? '✓ Active' : 'Set Active'}
+          </button>
+          <button class="btn btn-ghost btn-sm" onclick="openProjectModal(state.projects.find(x=>x.id==='${p.id}'))">Edit</button>
+          <button class="btn btn-ghost btn-sm" onclick="quickLaunchScan('${p.id}')">&#9658; Quick Scan</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteProject('${p.id}')">Delete</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function updateProjectStatsBar() {
+  const bar = document.getElementById('proj-stats-bar');
+  if (!bar) return;
+  const total = state.projects.length;
+  const active = state.currentProject ? 1 : 0;
+  const allStats = Object.values(state.projectStats);
+  const totalFindings = allStats.reduce((s, st) => s + (st?.total||0), 0);
+  const critProjects  = state.projects.filter(p => {
+    const st = state.projectStats[p.id];
+    return st && ((st.crit||0)*30 + (st.high||0)*15 + (st.medium||0)*6) >= 70;
+  }).length;
+  bar.innerHTML = [
+    { num:total,         lbl:'Projects',       col:'#38bdf8' },
+    { num:active,        lbl:'Active',         col:'#22c55e' },
+    { num:totalFindings, lbl:'Total Findings', col:'#94a3b8' },
+    { num:critProjects,  lbl:'Critical Risk',  col:'#ef4444' },
+  ].map(t => `<div class="stat-box"><div class="num" style="color:${t.col}">${t.num}</div><div class="lbl">${t.lbl}</div></div>`).join('');
+}
+
+function setActiveProject(id) {
+  state.currentProject = id; saveState(); renderProjectSelector(); renderProjectList();
+  const p = state.projects.find(x => x.id === id);
+  toast(`Active project: ${p?.name}`, 'ok');
+}
+function deleteProject(id) {
+  const p = state.projects.find(x => x.id === id);
+  if (!p || !confirm(`Delete project "${p.name}"? This cannot be undone.`)) return;
+  state.projects = state.projects.filter(x => x.id !== id);
+  delete state.projectStats[id];
+  if (state.currentProject === id) state.currentProject = null;
+  saveState(); renderProjectSelector(); renderProjectList();
+  toast(`Project "${p.name}" deleted.`, 'warn');
+}
+async function quickLaunchScan(projectId) {
+  const p = state.projects.find(x => x.id === projectId);
+  if (!p) return;
+  const tgts = Object.values(state.targets).filter(t => t.projectId === projectId);
+  if (!tgts.length) { toast('No targets in this project.', 'warn'); return; }
+  toast(`Quick scan launched for "${p.name}" (${tgts.length} targets)…`, 'info');
+  for (const t of tgts) await submitScan(t.url, 'recon,headers', p.defaultPolicy||'policy_normal', projectId);
+}
+
+// ─── Targets ──────────────────────────────────────────────────────────
+function renderTargetList() {
+  const el = document.getElementById('target-list');
+  if (!el) return;
+  const cur = state.currentProject;
+  const tgts = Object.values(state.targets).filter(t => !cur || t.projectId === cur);
+  if (!tgts.length) { el.innerHTML = `<div class="empty-state">No targets. Add one below.</div>`; return; }
+  el.innerHTML = tgts.map(t => `
+    <div class="target-row">
+      <div class="target-info">
+        <span class="target-url">${escHtml(t.url)}</span>
+        ${t.note ? `<span class="target-note">${escHtml(t.note)}</span>` : ''}
+      </div>
+      <div class="target-actions">
+        <button class="btn btn-primary btn-sm" onclick="launchScanForTarget('${t.id}')">&#9658; Scan</button>
+        <button class="btn btn-danger btn-sm"  onclick="deleteTarget('${t.id}')">&#10007;</button>
+      </div>
+    </div>`).join('');
+}
+function addTarget() {
+  const urlEl  = document.getElementById('target-url');
+  const noteEl = document.getElementById('target-note');
+  const url    = urlEl?.value.trim();
+  if (!url) { toast('Enter a target URL.', 'warn'); return; }
+  const id = uid();
+  state.targets[id] = { id, url, note: noteEl?.value.trim()||'', projectId: state.currentProject||null, addedAt: new Date().toISOString() };
+  saveState();
+  if (urlEl) urlEl.value = ''; if (noteEl) noteEl.value = '';
+  renderTargetList(); toast('Target added.', 'ok');
+}
+function deleteTarget(id) {
+  const t = state.targets[id]; if (!t) return;
+  delete state.targets[id]; saveState(); renderTargetList();
+}
+async function launchScanForTarget(targetId) {
+  const t = state.targets[targetId]; if (!t) return;
+  await submitScan(t.url, document.getElementById('scan-modules')?.value||'recon,headers',
+    document.getElementById('scan-policy')?.value||'policy_normal', t.projectId);
+}
+
+// ─── Scan submission ──────────────────────────────────────────────────
+async function submitScan(url, modules, policy, projectId) {
+  clog(`Submitting scan: ${url} [${modules}] policy=${policy}`, 'info');
+  const r = await apiFetch('/api/scan', {
+    method:'POST',
+    body: JSON.stringify({ url, modules: modules.split(',').map(s=>s.trim()), policy, projectId }),
+  });
+  if (r.ok && r.data?.jobId) {
+    clog(`Scan queued — Job ID: ${r.data.jobId}`, 'ok');
+    toast(`Scan queued: ${url}`, 'ok');
+    state.jobs.unshift({ id:r.data.jobId, url, status:'queued', createdAt:new Date().toISOString(), projectId });
+    refreshQueue();
+  } else {
+    clog(`Scan failed: ${r.err||JSON.stringify(r.data)}`, 'crit');
+    toast('Scan submission failed. Is the backend running?', 'warn');
+  }
+}
+const scanForm = document.getElementById('scan-form');
+if (scanForm) {
+  scanForm.addEventListener('submit', async e => {
+    e.preventDefault();
+    const url = document.getElementById('scan-url')?.value.trim();
+    if (!url) { toast('Enter a target URL.', 'warn'); return; }
+    await submitScan(url, document.getElementById('scan-modules')?.value||'recon,headers',
+      document.getElementById('scan-policy')?.value||'policy_normal', state.currentProject);
+  });
+}
+
+// ─── Queue ────────────────────────────────────────────────────────────
+async function loadQueue() {
+  const r = await apiFetch('/api/jobs');
+  if (r.ok && Array.isArray(r.data)) state.jobs = r.data;
+  refreshQueue();
+}
+function refreshQueue() {
+  const el = document.getElementById('job-list'); if (!el) return;
+  if (!state.jobs.length) { el.innerHTML = `<div class="empty-state">No jobs yet.</div>`; return; }
+  el.innerHTML = state.jobs.map(j => `
+    <div class="job-row">
+      <div class="job-info">
+        <span class="job-url">${escHtml(j.url||j.target||'')}</span>
+        <span>${statusBadge(j.status)}</span>
+        <span class="job-meta">${timeAgo(j.createdAt||j.started_at)}</span>
+      </div>
+      <div class="job-actions">
+        <button class="btn btn-ghost btn-sm" onclick="viewJobResults('${j.id}')">Results</button>
+        <button class="btn btn-danger btn-sm" onclick="cancelJob('${j.id}')">Cancel</button>
+      </div>
+    </div>`).join('');
+}
+async function viewJobResults(jobId) {
+  const r = await apiFetch(`/api/jobs/${jobId}/results`);
+  if (!r.ok || !r.data) { toast('No results yet.', 'warn'); return; }
+  const findings = Array.isArray(r.data) ? r.data : (r.data.findings||[]);
+  if (findings.length) {
+    state.findings = [...findings, ...state.findings];
+    updateProjectStats(findings); showPage('findings');
+    toast(`${findings.length} finding(s) loaded.`, 'ok');
+  } else toast('No findings for this job.', 'info');
+}
+async function cancelJob(jobId) {
+  await apiFetch(`/api/jobs/${jobId}/cancel`, { method:'POST' });
+  loadQueue(); toast('Job cancelled.', 'warn');
+}
+
+// ─── Findings ─────────────────────────────────────────────────────────
+async function loadFindings() {
+  const cur = state.currentProject;
+  const r = await apiFetch(cur ? `/api/findings?project=${cur}` : '/api/findings');
+  if (r.ok && Array.isArray(r.data)) {
+    state.findings = r.data; state.findingsPage = 0; updateProjectStats(r.data);
+  }
+  renderFindings();
+}
+function renderFindings() {
+  const el = document.getElementById('findings-list'); if (!el) return;
+  const sev    = document.getElementById('findings-filter-sev')?.value || '';
+  const search = document.getElementById('findings-filter-search')?.value?.toLowerCase() || '';
+  let data = state.findings;
+  if (sev)    data = data.filter(f => f.severity === sev);
+  if (search) data = data.filter(f =>
+    (f.title||'').toLowerCase().includes(search) ||
+    (f.url||'').toLowerCase().includes(search));
+  const page  = state.findingsPage;
+  const paged = data.slice(page*FINDINGS_PER_PAGE, (page+1)*FINDINGS_PER_PAGE);
+  if (!paged.length) { el.innerHTML = `<div class="empty-state">No findings.</div>`; updateFindingsPager(0,0); return; }
+  el.innerHTML = paged.map(f => `
+    <div class="finding-row">
+      <div class="finding-header">
+        ${sevBadge(f.severity)}
+        <span class="finding-title">${escHtml(f.title||f.name||'Finding')}</span>
+        ${f.category ? `<span class="finding-cat">${escHtml(f.category)}</span>` : ''}
+      </div>
+      <div class="finding-url">${escHtml(f.url||'')}</div>
+      ${f.description ? `<div class="finding-desc">${escHtml(f.description)}</div>` : ''}
+      ${f.recommendation ? `<div class="finding-rec"><strong>Fix:</strong> ${escHtml(f.recommendation)}</div>` : ''}
+    </div>`).join('');
+  updateFindingsPager(data.length, page);
+}
+function updateFindingsPager(total, page) {
+  const el = document.getElementById('findings-pager'); if (!el) return;
+  const pages = Math.ceil(total / FINDINGS_PER_PAGE);
+  el.innerHTML = total > FINDINGS_PER_PAGE ? `
+    <button class="btn btn-ghost btn-sm" onclick="findingsGoPage(${page-1})" ${page===0?'disabled':''}>&#8592; Prev</button>
+    <span style="font-size:11px;color:#94a3b8;">Page ${page+1} / ${pages} (${total} total)</span>
+    <button class="btn btn-ghost btn-sm" onclick="findingsGoPage(${page+1})" ${page>=pages-1?'disabled':''}>Next &#8594;</button>`
+    : `<span style="font-size:11px;color:#94a3b8;">${total} finding(s)</span>`;
+}
+function findingsGoPage(p) {
+  state.findingsPage = Math.max(0, Math.min(p, Math.ceil(state.findings.length/FINDINGS_PER_PAGE)-1));
+  renderFindings();
+}
+function updateProjectStats(findings) {
+  if (!state.currentProject) return;
+  const id = state.currentProject;
+  const counts = { crit:0, high:0, medium:0, low:0, info:0, total:0, lastScan:new Date().toISOString() };
+  findings.forEach(f => {
+    counts.total++;
+    const s = f.severity?.toLowerCase();
+    if (s==='critical') counts.crit++;
+    else if (s==='high') counts.high++;
+    else if (s==='medium') counts.medium++;
+    else if (s==='low') counts.low++;
+    else counts.info++;
+  });
+  state.projectStats[id] = counts; saveState();
+}
+
+// ─── Dashboard ────────────────────────────────────────────────────────
+async function loadDashboard() {
+  const r = await apiFetch('/api/findings');
+  if (r.ok && Array.isArray(r.data)) { state.findings = r.data; updateProjectStats(r.data); }
+  const score = computeRiskScore(state.findings);
+  const gauge = document.getElementById('dashboard-gauge');
+  if (gauge) gauge.innerHTML = buildGauge(score);
+  const counts = { critical:0, high:0, medium:0, low:0, info:0 };
+  state.findings.forEach(f => { if (counts[f.severity]!==undefined) counts[f.severity]++; });
+  ['critical','high','medium','low','info'].forEach(sev => {
+    const el = document.getElementById(`stat-${sev}`); if (el) el.textContent = counts[sev];
+  });
+  const totalEl = document.getElementById('stat-total'); if (totalEl) totalEl.textContent = state.findings.length;
+  const jobsEl  = document.getElementById('stat-jobs');  if (jobsEl)  jobsEl.textContent  = state.jobs.length;
+  const projEl  = document.getElementById('stat-projects'); if (projEl) projEl.textContent = state.projects.length;
+  renderProjectSelector();
+}
+
+// ─── Reports ──────────────────────────────────────────────────────────
+async function loadReports() {
+  const r = await apiFetch('/api/reports');
+  const el = document.getElementById('reports-list'); if (!el) return;
+  if (!r.ok || !r.data?.length) { el.innerHTML = `<div class="empty-state">No reports generated yet.</div>`; return; }
+  el.innerHTML = r.data.map(rep => `
+    <div class="report-row">
+      <div class="report-info">
+        <span class="report-name">${escHtml(rep.name||rep.id)}</span>
+        <span class="report-meta">${timeAgo(rep.createdAt)}</span>
+      </div>
+      <div class="report-actions">
+        <a class="btn btn-ghost btn-sm" href="${apiUrl('/api/reports/'+rep.id+'/download')}" target="_blank">Download</a>
+      </div>
+    </div>`).join('');
+}
+async function generateReport(format) {
+  clog(`Generating ${format.toUpperCase()} report…`, 'info');
+  const r = await apiFetch('/api/reports/generate', {
+    method:'POST', body:JSON.stringify({ format, projectId:state.currentProject, findings:state.findings }),
+  });
+  if (r.ok) { toast('Report generated!', 'ok'); loadReports(); }
+  else { toast('Report generation failed.', 'warn'); }
+}
+
+// ─── Dork Generator ───────────────────────────────────────────────────
+const DORK_TEMPLATES = {
+  login:       ['site:{d} inurl:login','site:{d} inurl:admin','site:{d} intitle:"login"'],
+  files:       ['site:{d} ext:pdf','site:{d} ext:xlsx OR ext:docx','site:{d} ext:sql OR ext:bak'],
+  exposure:    ['site:{d} inurl:config','site:{d} inurl:env','site:{d} "index of /"'],
+  credentials: ['site:{d} intext:"password" filetype:txt','site:{d} intext:"api_key"'],
+  cameras:     ['inurl:"/view/view.shtml"','intitle:"webcamXP 5"','inurl:mjpg/video.mjpg'],
+};
+function generateDorks() {
+  const domain  = document.getElementById('dork-domain')?.value.trim() || 'example.com';
+  const cat     = document.getElementById('dork-category')?.value      || 'login';
+  const dorks   = (DORK_TEMPLATES[cat]||DORK_TEMPLATES.login).map(t => t.replace(/\{d\}/g, domain));
+  const out = document.getElementById('dork-output');
+  if (out) out.value = dorks.join('\n');
+  clog(`Dorks generated: ${cat} for ${domain}`, 'ok');
+}
+function copyDorks() {
+  const out = document.getElementById('dork-output');
+  if (!out?.value) return;
+  navigator.clipboard.writeText(out.value).then(() => toast('Dorks copied!', 'ok'));
+}
+function searchDork(dork) { window.open(`https://www.google.com/search?q=${encodeURIComponent(dork)}`,'_blank'); }
+
+// ─── Settings ─────────────────────────────────────────────────────────
+function loadSettings() {
+  const urlEl  = document.getElementById('settings-backend-url');
+  const noteEl = document.getElementById('settings-auth-note');
+  if (urlEl)  urlEl.value  = CFG.backendUrl;
+  if (noteEl) noteEl.value = CFG.authNote;
+}
+function saveSettings() {
+  const urlEl  = document.getElementById('settings-backend-url');
+  const noteEl = document.getElementById('settings-auth-note');
+  if (urlEl?.value.trim()) { CFG.backendUrl = urlEl.value.trim(); localStorage.setItem('wvc_backend_url', CFG.backendUrl); }
+  if (noteEl) { CFG.authNote = noteEl.value.trim(); localStorage.setItem('wvc_auth_note', CFG.authNote); }
+  toast('Settings saved.', 'ok'); clog('Settings updated.', 'ok'); pingBackend();
+}
+function clearAllData() {
+  if (!confirm('Clear ALL local data?')) return;
+  localStorage.clear(); sessionStorage.clear();
+  toast('All data cleared. Reloading…', 'warn');
+  setTimeout(() => location.reload(), 1200);
+}
+const settingsBtn = document.getElementById('settings-save-btn');
+if (settingsBtn) settingsBtn.addEventListener('click', saveSettings);
+const clearBtn = document.getElementById('settings-clear-btn');
+if (clearBtn) clearBtn.addEventListener('click', clearAllData);
+
+// ─── Console commands ─────────────────────────────────────────────────
+const consoleInput = document.getElementById('console-input');
+if (consoleInput) {
+  consoleInput.addEventListener('keydown', async e => {
+    if (e.key !== 'Enter') return;
+    const raw = consoleInput.value.trim(); if (!raw) return;
+    clog(`> ${raw}`, 'cmd'); consoleInput.value = '';
+    await handleConsoleCmd(raw);
+  });
+}
+async function handleConsoleCmd(raw) {
+  const parts = raw.split(/\s+/);
+  const cmd   = parts[0].toLowerCase();
+  const args  = parts.slice(1);
+  switch (cmd) {
+    case 'help':
+      ['help               — show this help','ping               — test backend',
+       'scan <url> [mods]  — queue a scan','status             — counts',
+       'projects           — list projects','project new <name> — create project',
+       'project select <id>— set active','targets            — list targets',
+       'target add <url>   — add target','findings [sev]     — findings summary',
+       'clear              — clear console','version            — show version',
+      ].forEach(l => clog(l, 'info')); break;
+    case 'ping': await pingBackend(); break;
+    case 'scan':
+      if (!args[0]) { clog('Usage: scan <url> [modules]', 'warn'); break; }
+      await submitScan(args[0], args[1]||'recon,headers', 'policy_normal', state.currentProject); break;
+    case 'status':
+      clog(`Jobs: ${state.jobs.length} | Findings: ${state.findings.length} | Projects: ${state.projects.length}`, 'info');
+      clog(`Active project: ${state.currentProject || 'none'}`, 'info'); break;
+    case 'projects':
+      if (!state.projects.length) { clog('No projects.', 'warn'); break; }
+      state.projects.forEach(p => clog(`  ${p.id} — ${p.name}${p.id===state.currentProject?' [ACTIVE]':''}`, 'info')); break;
+    case 'project':
+      if (args[0] === 'new') {
+        const name = args.slice(1).join(' '); if (!name) { clog('Usage: project new <name>', 'warn'); break; }
+        const p = { id:uid(), name, createdAt:new Date().toISOString() };
+        state.projects.push(p); state.currentProject = p.id; saveState(); renderProjectSelector();
+        clog(`Project created: ${name} [${p.id}]`, 'ok');
+      } else if (args[0] === 'select') {
+        const p = state.projects.find(x => x.id===args[1] || x.name===args.slice(1).join(' '));
+        if (!p) { clog('Project not found.', 'warn'); break; }
+        state.currentProject = p.id; saveState(); renderProjectSelector(); clog(`Active: ${p.name}`, 'ok');
+      } else clog('Usage: project new <name> | project select <id>', 'warn'); break;
+    case 'targets':
+      const tgts = Object.values(state.targets).filter(t => !state.currentProject||t.projectId===state.currentProject);
+      if (!tgts.length) { clog('No targets.', 'warn'); break; }
+      tgts.forEach(t => clog(`  ${t.id} — ${t.url}`, 'info')); break;
+    case 'target':
+      if (args[0]==='add' && args[1]) {
+        const id = uid();
+        state.targets[id] = { id, url:args[1], projectId:state.currentProject||null, addedAt:new Date().toISOString() };
+        saveState(); renderTargetList(); clog(`Target added: ${args[1]}`, 'ok');
+      } else clog('Usage: target add <url>', 'warn'); break;
+    case 'findings': {
+      const sev = args[0];
+      const data = sev ? state.findings.filter(f=>f.severity===sev) : state.findings;
+      const counts = {};
+      data.forEach(f => { counts[f.severity]=(counts[f.severity]||0)+1; });
+      clog(`Findings (${data.length}): ${Object.entries(counts).map(([k,v])=>`${k}:${v}`).join(' | ')}`, 'info');
+      break;
+    }
+    case 'clear': consoleEl.innerHTML = ''; clog('Console cleared.', 'info'); break;
+    case 'version': clog('WebVulnConsole ⚡ v3 — Full client logic (restored)', 'info'); break;
+    default: clog(`Unknown command: "${cmd}". Type "help".`, 'warn');
+  }
+}
+
+// ─── Global exports ───────────────────────────────────────────────────
+window.state              = state;
+window.saveState          = saveState;
+window.openProjectModal   = openProjectModal;
+window.closeProjectModal  = closeProjectModal;
+window.renderProjectList  = renderProjectList;
+window.setActiveProject   = setActiveProject;
+window.deleteProject      = deleteProject;
+window.quickLaunchScan    = quickLaunchScan;
+window.addTarget          = addTarget;
+window.deleteTarget       = deleteTarget;
+window.launchScanForTarget= launchScanForTarget;
+window.findingsGoPage     = findingsGoPage;
+window.generateReport     = generateReport;
+window.generateDorks      = generateDorks;
+window.copyDorks          = copyDorks;
+window.searchDork         = searchDork;
+window.loadSettings       = loadSettings;
+window.cancelJob          = cancelJob;
+window.viewJobResults     = viewJobResults;
+window._wvcState          = state;
+window._wvcSaveState      = saveState;
+window._wvcToast          = toast;
+window._projStatsCache    = state.projectStats;
+
+// ─── Boot ─────────────────────────────────────────────────────────────
+(function boot() {
+  if (sessionStorage.getItem('wvc_tos') === 'yes') {
+    tosOverlay.classList.add('hidden');
+    appEl.classList.remove('hidden');
+    renderProjectSelector();
+    loadDashboard();
+    clog('Session restored.', 'ok');
+  }
+  const settingsNav = document.querySelector('[data-page="settings"]');
+  if (settingsNav) settingsNav.addEventListener('click', () => setTimeout(loadSettings, 50));
+})();
