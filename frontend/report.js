@@ -1,10 +1,14 @@
 /* =================================================================
-   WebVulnConsole ⚡ — Report Generator  (Task 7)
+   WebVulnConsole ⚡ — Report Generator  (Task 7 / TODO-10)
    Generates a full pentest report from a project's findings.
-   Exports:
-   - Styled HTML report (opens in new tab, printable to PDF)
-   - Markdown report (downloads as .md file)
-   Wired into the Reports page via loadReports() in app.js.
+   Exports (plain script globals, NOT ES modules):
+   - loadReports()          called by app.js showPage('reports')
+   - window._reportPreview(id)
+   - window._reportExportHtml()
+   - window._reportExportMd()
+   - window._reportPreviewHtml()
+   State bridge: reads window._wvcState (set by app.js at boot)
+   Toasts/logs:  calls window._wvcToast / window._wvcClog
    ================================================================= */
 'use strict';
 
@@ -41,12 +45,12 @@ function computeScore(findings) {
 
 // ─── Build report data from state ─────────────────────────────────────────
 function buildReportData(projectId) {
-  const state    = window._wvcState || window.state || {};
-  const projects = state.projects || [];
+  const st       = window._wvcState || {};
+  const projects = st.projects || [];
   const project  = projects.find(p => p.id === projectId);
   if (!project) return null;
 
-  const allFindings = (state.findings || []).filter(f => f.projectId === projectId);
+  const allFindings = (st.findings || []).filter(f => f.projectId === projectId);
   const sorted = [...allFindings].sort((a, b) =>
     (SEV_ORDER[a.severity] ?? 9) - (SEV_ORDER[b.severity] ?? 9)
   );
@@ -54,7 +58,7 @@ function buildReportData(projectId) {
   const counts = { critical:0, high:0, medium:0, low:0, info:0 };
   sorted.forEach(f => { if (counts[f.severity] !== undefined) counts[f.severity]++; });
 
-  const targets  = (state.targets?.[projectId] || []);
+  const targets  = (st.targets?.[projectId] || []);
   const score    = computeScore(sorted);
   const genDate  = new Date().toLocaleDateString('en-GB', { year:'numeric', month:'long', day:'numeric' });
 
@@ -67,7 +71,7 @@ function generateHtmlReport(data) {
   const col   = riskColor(score);
   const label = riskLabel(score);
 
-  const findingRows = findings.map((f, i) => {
+  const findingRows = findings.map((f) => {
     const c = SEV_COLORS[f.severity] || '#6b7280';
     return `
       <tr>
@@ -318,14 +322,16 @@ function download(filename, content, mime) {
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 
-// ─── Reports page renderer ───────────────────────────────────────────────────
-export function loadReports() {
+// ─── Reports page renderer ────────────────────────────────────────────────────
+// NOTE: Plain global function — NOT an ES module export.
+// app.js calls loadReports() directly via the nav loader map.
+function loadReports() {
   const el = document.getElementById('page-reports');
   if (!el) return;
 
-  const state    = window._wvcState || window.state || {};
-  const projects = state.projects || [];
-  const cur      = state.currentProject;
+  const st       = window._wvcState || {};
+  const projects = st.projects || [];
+  const cur      = st.currentProject;
 
   if (!projects.length) {
     el.innerHTML = `<div style="padding:40px;text-align:center;color:#475569;">
@@ -341,9 +347,7 @@ export function loadReports() {
   ).join('');
 
   el.innerHTML = `
-    <!-- Report Builder -->
     <div style="max-width:680px;">
-
       <div style="display:flex;flex-direction:column;gap:14px;
         background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:20px;margin-bottom:16px;">
 
@@ -378,23 +382,20 @@ export function loadReports() {
         </div>
       </div>
 
-      <!-- Live preview card -->
       <div id="report-preview-card"></div>
     </div>
   `;
 
-  // Wire focus styles
   const sel = document.getElementById('report-proj-select');
   if (sel) {
     sel.addEventListener('focus', () => sel.style.borderColor = '#38bdf8');
     sel.addEventListener('blur',  () => sel.style.borderColor = '#1e293b');
   }
 
-  // Render initial preview
   window._reportPreview(cur || projects[0]?.id);
 }
 
-// ─── Global handlers ───────────────────────────────────────────────────────────
+// ─── Global handlers ──────────────────────────────────────────────────────────
 window._reportPreview = function(projectId) {
   const card = document.getElementById('report-preview-card');
   if (!card || !projectId) return;
