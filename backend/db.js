@@ -8,6 +8,7 @@
 const Database = require('better-sqlite3');
 const path     = require('path');
 const fs       = require('fs');
+const { randomUUID } = require('crypto');
 const { config } = require('./config');
 
 // ── Ensure data directory exists ──────────────────────────────────────────────
@@ -46,6 +47,7 @@ db.exec(`
     host         TEXT NOT NULL,
     type         TEXT NOT NULL DEFAULT 'domain',
     notes        TEXT NOT NULL DEFAULT '',
+    env          TEXT NOT NULL DEFAULT 'prod',
     created_at   TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -116,8 +118,13 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_joblogs_job      ON job_logs(job_id);
 `);
 
+// ── Migrate: add env column to targets if it doesn't exist (for existing DBs) ─
+try {
+  db.exec(`ALTER TABLE targets ADD COLUMN env TEXT NOT NULL DEFAULT 'prod'`);
+} catch (_) { /* column already exists — safe to ignore */ }
+
 // ─────────────────────────────────────────────────────────────────────────────
-// PROJECT HELPERS
+// PREPARED STATEMENT CACHE
 // ─────────────────────────────────────────────────────────────────────────────
 const _stmts = {};
 
@@ -126,6 +133,9 @@ function stmt(sql) {
   return _stmts[sql];
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECT HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
 const projects = {
   create(p) {
     stmt(`INSERT INTO projects (id,name,client,auth_note,contact,status)
@@ -167,9 +177,9 @@ const projects = {
 // ─────────────────────────────────────────────────────────────────────────────
 const targets = {
   create(t) {
-    stmt(`INSERT INTO targets (id,project_id,host,type,notes) VALUES (@id,@project_id,@host,@type,@notes)`).run({
+    stmt(`INSERT INTO targets (id,project_id,host,type,notes,env) VALUES (@id,@project_id,@host,@type,@notes,@env)`).run({
       id: t.id, project_id: t.project_id, host: t.host,
-      type: t.type || 'domain', notes: t.notes || '',
+      type: t.type || 'domain', notes: t.notes || '', env: t.env || 'prod',
     });
     return targets.get(t.id);
   },
@@ -183,10 +193,19 @@ const targets = {
     return stmt(`DELETE FROM targets WHERE id=?`).run(id).changes > 0;
   },
   bulkCreate(rows) {
-    const insert = stmt(`INSERT OR IGNORE INTO targets (id,project_id,host,type,notes) VALUES (@id,@project_id,@host,@type,@notes)`);
-    const tx = db.transaction((items) => items.forEach(r => insert.run(r)));
-    tx(rows.map(r => ({ id: r.id, project_id: r.project_id, host: r.host, type: r.type || 'domain', notes: r.notes || '' })));
-    return rows.length;
+    const insert = stmt(`INSERT OR IGNORE INTO targets (id,project_id,host,type,notes,env) VALUES (@id,@project_id,@host,@type,@notes,@env)`);
+    const tx = db.transaction((items) => {
+      let count = 0;
+      for (const r of items) {
+        const result = insert.run({
+          id: r.id, project_id: r.project_id, host: r.host,
+          type: r.type || 'domain', notes: r.notes || '', env: r.env || 'prod',
+        });
+        count += result.changes;
+      }
+      return count;
+    });
+    return tx(rows);
   },
 };
 
@@ -195,38 +214,91 @@ const targets = {
 // ─────────────────────────────────────────────────────────────────────────────
 const jobs = {
   create(j) {
-    stmt(`INSERT INTO jobs (id,project_id,targets_json,policy_id,description,status)
-          VALUES (@id,@project_id,@targets_json,@policy_id,@description,@status)`).run({
-      id: j.id, project_id: j.projectId,
-      targets_json: JSON.stringify(j.targets || []),
-      policy_id: j.policyId || 'policy_normal',
-      description: j.description || '', status: 'queued',
+    const id = j.id || randomUUID();
+    const targetsJson = Array.isArray(j.targets) ? JSON.stringify(j.targets) : (j.targets_json || '[]');
+    stmt(`INSERT INTO jobs (id, project_id, targets_json, policy_id, description, status, progress)
+          VALUES (@id, @project_id, @targets_json, @policy_id, @description, @status, @progress)`).run({
+      id,
+      project_id:   j.projectId   || j.project_id,
+      targets_json: targetsJson,
+      policy_id:    j.policyId    || j.policy_id    || 'policy_normal',
+      description:  j.description || '',
+      status:       j.status      || 'queued',
+      progress:     j.progress    || 0,
     });
-    return jobs.get(j.id);
+    return jobs.get(id);
   },
+
   get(id) {
     const row = stmt(`SELECT * FROM jobs WHERE id=?`).get(id);
     if (!row) return null;
     return _hydrateJob(row);
   },
+
   list(filter = {}) {
     let sql = `SELECT * FROM jobs`;
-    const params = [];
-    if (filter.projectId) { sql += ` WHERE project_id=?`; params.push(filter.projectId); }
+    const conditions = [];
+    const params = {};
+
+    if (filter.status) {
+      conditions.push(`status = @status`);
+      params.status = filter.status;
+    }
+    if (filter.projectId || filter.project_id) {
+      conditions.push(`project_id = @project_id`);
+      params.project_id = filter.projectId || filter.project_id;
+    }
+
+    if (conditions.length) sql += ` WHERE ` + conditions.join(' AND ');
     sql += ` ORDER BY created_at DESC`;
-    return stmt(sql).all(...params).map(_hydrateJob);
+
+    return stmt(sql).all(params).map(_hydrateJob);
   },
+
   update(id, patch) {
-    const allowed = ['status','progress','error','finished_at'];
-    const sets = Object.keys(patch).filter(k => allowed.includes(k)).map(k => `${k}=@${k}`).join(',');
-    if (!sets) return jobs.get(id);
-    stmt(`UPDATE jobs SET ${sets}, updated_at=datetime('now') WHERE id=@id`).run({ ...patch, id });
+    const allowed = ['status', 'progress', 'error', 'finished_at'];
+    const sets = [];
+    const params = { id };
+
+    for (const key of allowed) {
+      const camelKey = key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+      if (patch[key] !== undefined) {
+        sets.push(`${key} = @${key}`);
+        params[key] = patch[key];
+      } else if (patch[camelKey] !== undefined) {
+        sets.push(`${key} = @${key}`);
+        params[key] = patch[camelKey];
+      }
+    }
+
+    // Map worker.js camelCase fields
+    if (patch.startedAt) {
+      sets.push(`updated_at = @updated_at`);
+      params.updated_at = patch.startedAt;
+    }
+    if (patch.completedAt) {
+      sets.push(`finished_at = @finished_at`);
+      params.finished_at = patch.completedAt;
+    }
+    // findingCount is not stored — findings are counted live from findings table
+
+    if (!sets.length) return jobs.get(id);
+
+    sets.push(`updated_at = datetime('now')`);
+    stmt(`UPDATE jobs SET ${sets.join(', ')} WHERE id = @id`).run(params);
     return jobs.get(id);
   },
+
+  delete(id) {
+    return stmt(`DELETE FROM jobs WHERE id=?`).run(id).changes > 0;
+  },
+
   nextQueued() {
     const row = stmt(`SELECT * FROM jobs WHERE status='queued' ORDER BY created_at ASC LIMIT 1`).get();
     return row ? _hydrateJob(row) : null;
   },
+
+  // Called at boot — resets any jobs stuck in 'running' state from a previous crash
   fixInterrupted() {
     stmt(`UPDATE jobs SET status='interrupted', updated_at=datetime('now') WHERE status='running'`).run();
   },
@@ -235,70 +307,124 @@ const jobs = {
 function _hydrateJob(row) {
   return {
     ...row,
-    targets: (() => { try { return JSON.parse(row.targets_json); } catch { return []; } })(),
     projectId: row.project_id,
     policyId:  row.policy_id,
+    targets:   (() => { try { return JSON.parse(row.targets_json || '[]'); } catch { return []; } })(),
   };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FINDING HELPERS
+// FINDINGS HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
 const findings = {
   create(f) {
+    const id = f.id || randomUUID();
     stmt(`INSERT INTO findings
-          (id,job_id,project_id,target,rule_id,category,title,severity,url,evidence,description,remediation,owasp_tag,cwe_tag,cve_tag,status)
+          (id, job_id, project_id, target, rule_id, category, title, severity, url, evidence, description, remediation, owasp_tag, cwe_tag, cve_tag, status)
           VALUES
-          (@id,@job_id,@project_id,@target,@rule_id,@category,@title,@severity,@url,@evidence,@description,@remediation,@owasp_tag,@cwe_tag,@cve_tag,@status)`
-    ).run({
-      id: f.id, job_id: f.jobId, project_id: f.projectId,
-      target: f.target || '', rule_id: f.ruleId || '',
-      category: f.category || '', title: f.title || 'Finding',
-      severity: f.severity || 'info', url: f.url || '',
-      evidence: f.evidence || '', description: f.description || '',
-      remediation: f.remediation || '', owasp_tag: f.owaspTag || '',
-      cwe_tag: f.cweTag || '', cve_tag: f.cveTag || '',
-      status: f.status || 'open',
+          (@id, @job_id, @project_id, @target, @rule_id, @category, @title, @severity, @url, @evidence, @description, @remediation, @owasp_tag, @cwe_tag, @cve_tag, @status)`).run({
+      id,
+      job_id:      f.jobId      || f.job_id,
+      project_id:  f.projectId  || f.project_id,
+      target:      f.target     || f.url         || '',
+      rule_id:     f.ruleId     || f.rule_id      || f.moduleId || '',
+      category:    f.category   || '',
+      title:       f.title      || '',
+      severity:    f.severity   || 'info',
+      url:         f.url        || '',
+      evidence:    f.evidence   || f.bodySnippet  || '',
+      description: f.description|| f.shortDescription || '',
+      remediation: f.remediation|| '',
+      owasp_tag:   f.owaspTag   || f.owasp_tag    || '',
+      cwe_tag:     f.cweTag     || f.cwe_tag       || '',
+      cve_tag:     f.cveTag     || f.cve_tag       || '',
+      status:      f.status     || 'open',
     });
-    return f.id;
+    return findings.get(id);
   },
-  bulkCreate(rows) {
-    const insert = stmt(`INSERT OR IGNORE INTO findings
-      (id,job_id,project_id,target,rule_id,category,title,severity,url,evidence,description,remediation,owasp_tag,cwe_tag,cve_tag,status)
-      VALUES
-      (@id,@job_id,@project_id,@target,@rule_id,@category,@title,@severity,@url,@evidence,@description,@remediation,@owasp_tag,@cwe_tag,@cve_tag,@status)`);
-    const tx = db.transaction((items) => items.forEach(f => insert.run(f)));
-    tx(rows.map(f => ({
-      id: f.id, job_id: f.jobId, project_id: f.projectId,
-      target: f.target || '', rule_id: f.ruleId || '',
-      category: f.category || '', title: f.title || 'Finding',
-      severity: f.severity || 'info', url: f.url || '',
-      evidence: f.evidence || '', description: f.description || '',
-      remediation: f.remediation || '', owasp_tag: f.owaspTag || '',
-      cwe_tag: f.cweTag || '', cve_tag: f.cveTag || '',
-      status: f.status || 'open',
-    })));
+
+  get(id) {
+    return stmt(`SELECT * FROM findings WHERE id=?`).get(id) || null;
   },
-  listByJob(job_id) {
-    return stmt(`SELECT * FROM findings WHERE job_id=? ORDER BY severity DESC, created_at ASC`).all(job_id);
+
+  listByJob(jobId) {
+    return stmt(`SELECT * FROM findings WHERE job_id=? ORDER BY
+      CASE severity
+        WHEN 'critical' THEN 1
+        WHEN 'high'     THEN 2
+        WHEN 'medium'   THEN 3
+        WHEN 'low'      THEN 4
+        ELSE 5
+      END, created_at DESC`).all(jobId);
   },
-  listByProject(project_id, filters = {}) {
+
+  listByProject(projectId, filters = {}) {
     let sql = `SELECT * FROM findings WHERE project_id=?`;
-    const params = [project_id];
+    const params = [projectId];
     if (filters.severity) { sql += ` AND severity=?`; params.push(filters.severity); }
     if (filters.status)   { sql += ` AND status=?`;   params.push(filters.status); }
     if (filters.category) { sql += ` AND category=?`; params.push(filters.category); }
-    sql += ` ORDER BY CASE severity WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 WHEN 'low' THEN 4 ELSE 5 END, created_at ASC`;
+    sql += ` ORDER BY CASE severity
+      WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 WHEN 'low' THEN 4 ELSE 5
+      END, created_at DESC`;
     return stmt(sql).all(...params);
   },
-  updateStatus(id, status) {
-    return stmt(`UPDATE findings SET status=? WHERE id=?`).run(status, id).changes > 0;
+
+  bulkCreate(rows) {
+    const insert = stmt(`INSERT OR IGNORE INTO findings
+      (id, job_id, project_id, target, rule_id, category, title, severity, url, evidence, description, remediation, owasp_tag, cwe_tag, cve_tag, status)
+      VALUES
+      (@id, @job_id, @project_id, @target, @rule_id, @category, @title, @severity, @url, @evidence, @description, @remediation, @owasp_tag, @cwe_tag, @cve_tag, @status)`);
+    const tx = db.transaction((items) => {
+      let count = 0;
+      for (const f of items) {
+        const result = insert.run({
+          id:          f.id          || randomUUID(),
+          job_id:      f.jobId       || f.job_id,
+          project_id:  f.projectId   || f.project_id,
+          target:      f.target      || f.url         || '',
+          rule_id:     f.ruleId      || f.rule_id      || f.moduleId || '',
+          category:    f.category    || '',
+          title:       f.title       || '',
+          severity:    f.severity    || 'info',
+          url:         f.url         || '',
+          evidence:    f.evidence    || f.bodySnippet  || '',
+          description: f.description || f.shortDescription || '',
+          remediation: f.remediation || '',
+          owasp_tag:   f.owaspTag    || f.owasp_tag    || '',
+          cwe_tag:     f.cweTag      || f.cwe_tag       || '',
+          cve_tag:     f.cveTag      || f.cve_tag       || '',
+          status:      f.status      || 'open',
+        });
+        count += result.changes;
+      }
+      return count;
+    });
+    return tx(rows);
   },
+
+  updateStatus(id, status) {
+    stmt(`UPDATE findings SET status=@status WHERE id=@id`).run({ id, status });
+    return findings.get(id);
+  },
+
   markFalsePositive(id, val = 1) {
     return stmt(`UPDATE findings SET false_positive=? WHERE id=?`).run(val ? 1 : 0, id).changes > 0;
   },
-  severitySummary(project_id) {
-    return stmt(`SELECT severity, COUNT(*) as count FROM findings WHERE project_id=? AND false_positive=0 GROUP BY severity`).all(project_id);
+
+  severitySummary(projectId) {
+    const rows = stmt(`SELECT severity, COUNT(*) as count FROM findings WHERE project_id=? AND false_positive=0 GROUP BY severity`).all(projectId);
+    const summary = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+    for (const row of rows) {
+      if (Object.prototype.hasOwnProperty.call(summary, row.severity)) {
+        summary[row.severity] = row.count;
+      }
+    }
+    return summary;
+  },
+
+  delete(id) {
+    return stmt(`DELETE FROM findings WHERE id=?`).run(id).changes > 0;
   },
 };
 
@@ -306,11 +432,26 @@ const findings = {
 // JOB LOGS
 // ─────────────────────────────────────────────────────────────────────────────
 const jobLogs = {
-  append(job_id, level, message) {
-    stmt(`INSERT INTO job_logs (job_id,level,message) VALUES (?,?,?)`).run(job_id, level, message);
+  append(jobId, level, message) {
+    stmt(`INSERT INTO job_logs (job_id, level, message) VALUES (@job_id, @level, @message)`).run({
+      job_id:  jobId,
+      level:   level || 'info',
+      message: String(message),
+    });
   },
-  getByJob(job_id, limit = 500) {
-    return stmt(`SELECT * FROM job_logs WHERE job_id=? ORDER BY id ASC LIMIT ?`).all(job_id, limit);
+
+  // Returns plain message strings — used by getJobResult() API response
+  getByJob(jobId) {
+    return stmt(`SELECT message FROM job_logs WHERE job_id=? ORDER BY ts ASC`).all(jobId).map(r => r.message);
+  },
+
+  // Returns full rows with level + ts — used internally / debug
+  getByJobFull(jobId) {
+    return stmt(`SELECT * FROM job_logs WHERE job_id=? ORDER BY ts ASC`).all(jobId);
+  },
+
+  clear(jobId) {
+    return stmt(`DELETE FROM job_logs WHERE job_id=?`).run(jobId).changes;
   },
 };
 
@@ -325,9 +466,12 @@ const auditLog = {
   recent(limit = 100) {
     return stmt(`SELECT * FROM audit_log ORDER BY id DESC LIMIT ?`).all(limit);
   },
+  listByEntity(entity, entityId) {
+    return stmt(`SELECT * FROM audit_log WHERE entity=? AND entity_id=? ORDER BY ts DESC`).all(entity, entityId);
+  },
 };
 
-// Fix any jobs left in running state from a previous crash
+// ── Boot: fix any jobs left running from a previous crash ─────────────────────
 jobs.fixInterrupted();
 
 module.exports = { db, projects, targets, jobs, findings, jobLogs, auditLog };
